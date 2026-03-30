@@ -28,7 +28,12 @@ const AuthForm: React.FC = () => {
         if (error) {
           setError(error.message);
         } else {
-          setMessage('確認メールを送信しました。メールを確認してください。');
+          // 登録成功 → 自動ログイン試行
+          const { error: loginError } = await signIn(email, password);
+          if (loginError) {
+            // 確認メールが必要な場合
+            setMessage('アカウントを作成しました。確認メールが届かない場合は、Supabaseダッシュボードで「Confirm email」を無効にしてください。');
+          }
         }
       }
     } finally {
