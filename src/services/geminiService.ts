@@ -3,6 +3,7 @@
  * 服の説明をプロンプトに最適化
  */
 
+declare const process: { env: { API_KEY?: string } };
 const API_KEY = process.env.API_KEY;
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-latest:generateContent';
 

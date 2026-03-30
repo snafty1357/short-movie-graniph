@@ -38,7 +38,7 @@ const App: React.FC = () => {
   const [humanFile, setHumanFile] = useState<File | null>(null);
   const [humanPreview, setHumanPreview] = useState<string | null>(null);
   // モデル画像（背面）
-  const [humanBackFile, setHumanBackFile] = useState<File | null>(null);
+  const [_humanBackFile, setHumanBackFile] = useState<File | null>(null);
   const [humanBackPreview, setHumanBackPreview] = useState<string | null>(null);
 
   // ローディング中
@@ -362,10 +362,11 @@ const App: React.FC = () => {
                     key={garment.id}
                     onClick={() => setActiveGarmentId(garment.id)}
                     className={`cursor-pointer transition-all ${
-                      activeGarmentId === garment.id ? 'ring-2 ring-offset-2 ring-offset-[#1a1a2e]' : ''
+                      activeGarmentId === garment.id ? 'rounded-xl' : ''
                     }`}
                     style={{
-                      ringColor: activeGarmentId === garment.id ? garment.accentColor : undefined
+                      outline: activeGarmentId === garment.id ? `2px solid ${garment.accentColor}` : undefined,
+                      outlineOffset: '2px'
                     }}
                   >
                     <ImageUploader
