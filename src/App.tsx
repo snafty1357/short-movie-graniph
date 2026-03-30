@@ -69,25 +69,6 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<ResultItem[]>([]);
 
-  // ローディング中
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#a78bfa] to-[#7c3aed] flex items-center justify-center text-3xl font-black mx-auto mb-4 animate-pulse">
-            K
-          </div>
-          <p className="text-[#a0a0b0] text-sm">読み込み中...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // 未ログイン
-  if (!user) {
-    return <AuthForm />;
-  }
-
   // モデル画像選択（正面）
   const handleHumanSelect = useCallback(async (file: File) => {
     setHumanFile(file);
@@ -247,6 +228,26 @@ const App: React.FC = () => {
       setIsGenerating(false);
     }
   }, [humanFile, uploadedGarments, resolution, imageFormat]);
+
+  // ローディング中
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#a78bfa] to-[#7c3aed] flex items-center justify-center text-3xl font-black mx-auto mb-4 animate-pulse">
+            K
+          </div>
+          <p className="text-[#a0a0b0] text-sm">読み込み中...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // 未ログイン
+  if (!user) {
+    return <AuthForm />;
+  }
+
 
   return (
     <div className="min-h-screen bg-[#0a0a0f]">
