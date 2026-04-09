@@ -438,14 +438,30 @@ JSONのみを出力してください。`;
   };
 }
 
+export interface PoseAnalysisResult {
+  detectedPose: string;
+  question: string;
+  options: string[];
+}
+
 /**
- * モデル画像からポーズを分析
+ * モデル画像からポーズを分析し、ユーザーへ質問を生成
  */
-export async function analyzePose(imageDataUrl: string): Promise<string> {
+export async function analyzePose(imageDataUrl: string): Promise<PoseAnalysisResult> {
   const messages: ConversationMessage[] = [
     {
       role: 'system',
-      content: 'You are a pose analysis expert. Analyze the person\'s pose in the image and return a short English phrase describing the pose. Examples: "standing front-facing", "walking naturally", "sitting on a chair", "arms crossed confidently", "leaning against a wall casually", "standing with hands on hips", "looking over shoulder", "standing with one hand in pocket". Return ONLY the pose description, nothing else.',
+      content: `あなたはプロのAIポーズアナリストです。画像から人物の姿勢やポーズを分析し、JSONで次の情報を返してください。
+1. detectedPose: 生成AIで使える短い英語のポーズプロンプト（例: "standing front-facing", "walking naturally", "sitting on a chair"）
+2. question: ユーザーに対して、このポーズをどう指示するか（そのまま使うか、アレンジするか等）の日本語の質問
+3. options: ユーザーが選べる日本語の選択肢（2〜4個）
+
+JSON形式:
+{
+  "detectedPose": "english prompt",
+  "question": "日本語の質問",
+  "options": ["選択肢1", "選択肢2"]
+}`,
     },
     {
       role: 'user',
@@ -456,14 +472,28 @@ export async function analyzePose(imageDataUrl: string): Promise<string> {
         },
         {
           type: 'text',
-          text: 'Describe this person\'s pose in a short English phrase.',
+          text: 'この画像のポーズを分析し、JSON形式で返答してください。',
         },
       ],
     },
   ];
 
-  const result = await callChatGPTWithHistory(messages);
-  return result.trim().toLowerCase().replace(/[."']/g, '');
+  try {
+    const result = await callChatGPTWithHistory(messages);
+    const parsed = JSON.parse(result);
+    return {
+      detectedPose: parsed.detectedPose || '',
+      question: parsed.question || 'ポーズをどのように設定しますか？',
+      options: parsed.options || ['このまま'],
+    };
+  } catch (err) {
+    console.error('Pose parsing error:', err);
+    return {
+      detectedPose: 'standing naturally',
+      question: 'AIによるポーズ分析ができませんでした。どのようにしますか？',
+      options: ['自然に立たせる', '元の画像にできるだけ寄せる'],
+    };
+  }
 }
 
 /**

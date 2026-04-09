@@ -6,7 +6,7 @@ import PromptModal from './components/PromptModal';
 import TryOnPromptModal from './components/TryOnPromptModal';
 import { useAuth } from './contexts/AuthContext';
 import { generateTryOn, fileToDataUrl, type Resolution, type ImageFormat } from './services/falService';
-import { generateQuestions, generatePromptFromAnswers, optimizeTryOnPrompt, parsePrompt, analyzeGarmentWithChatGPT, analyzeGarment, describeGarment, analyzePose, type Question, type GarmentAnalysis } from './services/openaiService';
+import { generateQuestions, generatePromptFromAnswers, optimizeTryOnPrompt, parsePrompt, analyzeGarmentWithChatGPT, analyzeGarment, describeGarment, analyzePose, type Question, type GarmentAnalysis, type PoseAnalysisResult } from './services/openaiService';
 import { useTheme } from './contexts/ThemeContext';
 import { supabase } from './services/supabaseClient';
 import { getDeviceId, addToHistory } from './services/historyService';
@@ -70,6 +70,7 @@ const App: React.FC = () => {
   // ポーズ指定
   const [selectedPose, setSelectedPose] = useState<string>('');
   const [isAnalyzingPose, setIsAnalyzingPose] = useState(false);
+  const [poseQuestionResult, setPoseQuestionResult] = useState<PoseAnalysisResult | null>(null);
   const poseInputRef = useRef<HTMLInputElement>(null);
 
   // プロンプトモーダル
@@ -812,8 +813,8 @@ const App: React.FC = () => {
                       setIsAnalyzingPose(true);
                       try {
                         const dataUrl = await fileToDataUrl(file);
-                        const detectedPose = await analyzePose(dataUrl);
-                        setSelectedPose(detectedPose);
+                        const result = await analyzePose(dataUrl);
+                        setPoseQuestionResult(result);
                       } catch (err) {
                         console.error('Pose analysis error:', err);
                       } finally {
@@ -1155,6 +1156,45 @@ const App: React.FC = () => {
         isGeneratingTryOn={isGenerating}
         initialPrompt={reusedPrompt}
       />
+
+      {/* Pose Analysis Modal */}
+      {poseQuestionResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="p-4 border-b border-[#E0E0E0] shrink-0 bg-[#F8FAFC]">
+              <h2 className="text-sm font-bold text-[#333333] flex items-center gap-2">
+                <span className="text-xl">✨</span> AIポーズ分析
+              </h2>
+            </div>
+            
+            <div className="p-6 overflow-y-auto">
+              <p className="text-sm text-[#333333] mb-6 leading-relaxed bg-[#f0f9ff] p-4 rounded-xl border border-[#bae6fd]">
+                {poseQuestionResult.question}
+              </p>
+              
+              <div className="space-y-3">
+                {poseQuestionResult.options.map((option, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => {
+                      setSelectedPose(`${poseQuestionResult.detectedPose} (${option})`);
+                      setPoseQuestionResult(null);
+                    }}
+                    className="w-full text-left p-4 rounded-xl border border-[#E0E0E0] hover:border-[#00BFA5] hover:bg-[#00BFA5]/5 hover:shadow-md transition-all group"
+                  >
+                    <div className="flex items-center">
+                      <div className="w-6 h-6 rounded-full border-2 border-[#E0E0E0] group-hover:border-[#00BFA5] flex items-center justify-center mr-3 shrink-0">
+                        <div className="w-2.5 h-2.5 rounded-full bg-[#00BFA5] opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                      <span className="text-sm text-[#333333] font-medium">{option}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* History Panel */}
       <HistoryPanel
