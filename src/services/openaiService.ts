@@ -71,7 +71,8 @@ async function callChatGPTWithHistory(
 export async function generateQuestions(
   modelImageBase64: string,
   garmentImageBase64: string,
-  garmentDescription?: string
+  garmentDescription?: string,
+  selectedPose?: string
 ): Promise<Question[]> {
   const systemPrompt = `あなたはプロのファッションスタイリスト兼バーチャル試着AIアシスタントです。
 
@@ -91,9 +92,10 @@ export async function generateQuestions(
 
 質問は日本語で、選択肢は2〜5個にしてください。`;
 
-  const userPrompt = `モデル画像と衣服画像を分析し、着こなし方についてのみ質問を作成してください。
+const userPrompt = `モデル画像と衣服画像を分析し、着こなし方についてのみ質問を作成してください。
 
 ${garmentDescription ? `衣服の説明: ${garmentDescription}` : ''}
+${selectedPose ? `【指定されているポーズ】: ${selectedPose}` : ''}
 
 【重要】服のディテール（ボタンの数、装飾、柄、ロゴ、ポケット、ステッチなど）は画像から完全に再現するため、これらについての質問は不要です。
 
@@ -111,7 +113,7 @@ ${garmentDescription ? `衣服の説明: ${garmentDescription}` : ''}
 - 全体の雰囲気（カジュアル/きれいめ等）
 
 【ポーズ・姿勢】
-- モデル画像のポーズを分析し、それを維持するか、別のポーズ（ポケットに手を入れる、腕を組む、横向き、振り返る、歩く姿など）に変更するか質問してください。
+${selectedPose ? `- ユーザーは既にポーズ「${selectedPose}」を参考として指定しています。このポーズを活かすか、それとも調整するか（例えば目線、手の細かい位置など）について質問してください。` : `- モデル画像のポーズを分析し、それを維持するか、別のポーズ（ポケットに手を入れる、腕を組む、横向き、振り返る、歩く姿など）に変更するか質問してください。`}
 
 服のデザイン自体に関する質問は絶対にしないでください。
 JSON配列形式で返してください。`;
@@ -178,7 +180,8 @@ export async function generatePromptFromAnswers(
   modelImageBase64: string,
   garmentImageBase64: string,
   questions: Question[],
-  garmentDescription?: string
+  garmentDescription?: string,
+  selectedPose?: string
 ): Promise<string> {
   const answeredQuestions = questions
     .filter(q => q.answer)
@@ -218,11 +221,12 @@ Output format:
 [Avoid]
 (Things to avoid, including any garment alterations)`;
 
-  const userPrompt = `Create a virtual try-on prompt.
+const userPrompt = `Create a virtual try-on prompt.
 
 CRITICAL: The garment must be reproduced with 100% accuracy - every detail (buttons, pockets, logos, patterns, stitches, decorations) must be preserved exactly as shown in the image.
 
 ${garmentDescription ? `Garment description: ${garmentDescription}\n` : ''}
+${selectedPose ? `Target Pose / Posture: ${selectedPose}\n` : ''}
 User's styling preferences (how to wear it):
 ${answeredQuestions}
 

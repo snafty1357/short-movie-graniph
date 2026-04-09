@@ -332,7 +332,7 @@ const App: React.FC = () => {
         const analysisDesc = analysisToDescription(garment.analysis);
         const fullDesc = analysisDesc ? `${desc} [${analysisDesc}]` : desc;
 
-        const questions = await generateQuestions(humanDataUrl, garmentDataUrl, fullDesc || undefined);
+        const questions = await generateQuestions(humanDataUrl, garmentDataUrl, fullDesc || undefined, selectedPose);
         
         // アイテムラベルを付与して結合
         const taggedQuestions = questions.map(q => ({
@@ -376,7 +376,8 @@ const App: React.FC = () => {
         humanDataUrl,
         garmentDataUrl,
         questions,
-        combinedDescription || undefined
+        combinedDescription || undefined,
+        selectedPose
       );
       setUsageStats(prev => ({ ...prev, chatgptCalls: prev.chatgptCalls + 1 }));
       return prompt;
