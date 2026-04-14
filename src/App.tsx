@@ -10,7 +10,7 @@ import StoryboardWorkflowModal from './components/StoryboardWorkflowModal';
 
 import { User, Users, Sun, Moon, UserCircle, RotateCcw, Pencil, ChevronDown, Sparkles, Image as ImageIcon, Loader2, Upload, Play, BookOpen } from 'lucide-react';
 import { generatePose, fileToDataUrl } from './services/falService';
-import { generateFixedElements, generateCutComposition, compositionRowToCutItem, DEFAULT_FIXED_META_PROMPT, DEFAULT_REGULATION, type AiModelType } from './services/storyPdfService';
+import { generateFixedElements, generateCutComposition, compositionRowToCutItem, DEFAULT_FIXED_META_PROMPT, DEFAULT_REGULATION, DEFAULT_META_PROMPT, type AiModelType } from './services/storyPdfService';
 
 
 
@@ -196,7 +196,7 @@ const App: React.FC = () => {
       console.log('[AutoGenerate] Step 1: 要素固定プロンプト生成中...');
       setIsGeneratingFixed(true);
       const reg = localStorage.getItem('snafty_regulation') || DEFAULT_REGULATION;
-      const cutMeta = localStorage.getItem('snafty_meta_prompt') || '';
+      const cutMeta = localStorage.getItem('snafty_meta_prompt') || DEFAULT_META_PROMPT;
 
       const generatedFixed = await generateFixedElements(
         pdfText,
@@ -247,7 +247,21 @@ masterpiece, 8k resolution, highly detailed, [ストーリーに合った追加�
       // Step 3: AIカット割り生成
       console.log('[AutoGenerate] Step 3: AIカット割り生成中...');
       const cutResult = await generateCutComposition(pdfText, reg, cutMeta, 7, aiModel);
+
+      // デバッグログ: AIからの生データを確認
+      console.log('[AutoGenerate] AI Response cuts:', cutResult.cuts);
+      cutResult.cuts.forEach((cut, i) => {
+        console.log(`[AutoGenerate] Cut ${i+1}: ipPresence=${cut.ipPresence}, ipAction=${cut.ipAction}, ipExpression=${cut.ipExpression}, ipPosition=${cut.ipPosition}`);
+      });
+
       const newCuts = cutResult.cuts.map((row, i) => compositionRowToCutItem(row, i));
+
+      // デバッグログ: 変換後のカットを確認
+      console.log('[AutoGenerate] Converted cuts:', newCuts);
+      newCuts.forEach((cut, i) => {
+        console.log(`[AutoGenerate] CutItem ${i+1}: showSub=${cut.showSub}, ipPrompt=${cut.ipPrompt}`);
+      });
+
       setCuts(newCuts);
       setEditingCutId(null);
 
