@@ -216,8 +216,22 @@ const App: React.FC = () => {
       setCuts(newCuts);
       setEditingCutId(null);
 
-      // Step 2: 静止画プロンプトを英語で生成（静止画メタプロンプトを使用）
-      console.log('[AutoGenerate] Step 2: 静止画プロンプト生成中...');
+      // Step 2: 要素固定プロンプト生成
+      console.log('[AutoGenerate] Step 2: 要素固定プロンプト生成中...');
+      setIsGeneratingFixed(true);
+      const generatedFixed = await generateFixedElements(
+        pdfText,
+        reg,
+        cutMeta,
+        fixedElementMetaPrompt,
+        aiModel
+      );
+      setStagePrompt(generatedFixed);
+      setIsGeneratingFixed(false);
+      console.log('[AutoGenerate] Generated fixed elements:', generatedFixed);
+
+      // Step 3: 静止画プロンプトを英語で生成（静止画メタプロンプトを使用）
+      console.log('[AutoGenerate] Step 3: 静止画プロンプト生成中...');
 
       // カット情報をサマリーとして使用
       const cutsSummary = newCuts.map((c, i) => `Cut ${i+1}: ${c.title} - ${c.prompt.substring(0, 50)}`).join('\n');
@@ -243,6 +257,9 @@ The output should be a single line of comma-separated English keywords/phrases t
               role: 'user',
               content: `静止画メタプロンプト（ユーザーの指示）:
 ${stillImageMetaPrompt}
+
+要素固定プロンプト:
+${generatedFixed}
 
 ストーリー概要:
 ${pdfText.substring(0, 800)}
