@@ -246,7 +246,7 @@ const App: React.FC = () => {
 
       // 選択されたAIモデルに応じてエンドポイントとモデル名を決定
       const aiEndpoint = `/api/${aiModel}`;
-      const aiModelName = aiModel === 'openai' ? 'gpt-4o' : aiModel === 'gemini' ? 'gemini-2.5-flash' : 'claude-3-7-sonnet-20250219';
+      const aiModelName = aiModel === 'openai' ? 'gpt-4o' : aiModel === 'gemini' ? 'gemini-2.5-flash' : 'claude-sonnet-4-20250514';
 
       const regenerateResponse = await fetch(aiEndpoint, {
         method: 'POST',

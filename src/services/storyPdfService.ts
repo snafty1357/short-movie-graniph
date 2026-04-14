@@ -199,7 +199,7 @@ JSONのみを返してください。説明文は不要です。`;
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: aiModel === 'openai' ? 'gpt-4o' : aiModel === 'gemini' ? 'gemini-2.5-flash' : 'claude-3-7-sonnet-20250219',
+      model: aiModel === 'openai' ? 'gpt-4o' : aiModel === 'gemini' ? 'gemini-2.5-flash' : 'claude-sonnet-4-20250514',
       messages: [
         { role: 'system', content: systemMessage },
         { role: 'user', content: userMessage },
@@ -315,7 +315,7 @@ ${regulation}
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: aiModel === 'openai' ? 'gpt-4o' : aiModel === 'gemini' ? 'gemini-2.5-flash' : 'claude-3-7-sonnet-20250219',
+      model: aiModel === 'openai' ? 'gpt-4o' : aiModel === 'gemini' ? 'gemini-2.5-flash' : 'claude-sonnet-4-20250514',
       messages: [
         { role: 'system', content: systemMessage },
         { role: 'user', content: userMessage },
