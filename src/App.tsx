@@ -597,6 +597,32 @@ JSON配列形式で出力してください。`
           </div>
           <div className="flex items-center gap-3">
 
+            {/* AI Model Selector - Global */}
+            <div className="flex items-center gap-1.5 bg-gray-100 dark:bg-white/5 rounded-xl px-2 py-1.5 border border-gray-200 dark:border-white/10">
+              <Sparkles size={12} className="text-purple-500" />
+              <span className="text-[9px] font-bold text-gray-500 dark:text-gray-400 mr-1">AI:</span>
+              {(['openai', 'gemini', 'claude'] as const).map((model) => (
+                <button
+                  key={model}
+                  onClick={() => {
+                    setAiModel(model);
+                    localStorage.setItem('snafty_ai_model', model);
+                  }}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
+                    aiModel === model
+                      ? model === 'openai'
+                        ? 'bg-green-500 text-white shadow-sm shadow-green-500/30'
+                        : model === 'gemini'
+                        ? 'bg-blue-500 text-white shadow-sm shadow-blue-500/30'
+                        : 'bg-orange-500 text-white shadow-sm shadow-orange-500/30'
+                      : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/10'
+                  }`}
+                >
+                  {model === 'openai' ? 'GPT-4o' : model === 'gemini' ? 'Gemini' : 'Claude'}
+                </button>
+              ))}
+            </div>
+
             {/* Character Settings Button */}
               <div className="relative" ref={charPanelRef}>
                 <button
@@ -935,29 +961,6 @@ JSON配列形式で出力してください。`
 
                 {/* Toolbar on the Right */}
                 <div className="flex items-center gap-3">
-                  {/* AI Model Selector */}
-                  <div className="flex items-center gap-1 bg-gray-100 dark:bg-white/5 rounded-lg p-0.5">
-                    {(['openai', 'gemini', 'claude'] as const).map((model) => (
-                      <button
-                        key={model}
-                        onClick={() => {
-                          setAiModel(model);
-                          localStorage.setItem('snafty_ai_model', model);
-                        }}
-                        className={`px-2 py-1 rounded-md text-[9px] font-bold transition-all ${
-                          aiModel === model
-                            ? model === 'openai'
-                              ? 'bg-green-500 text-white'
-                              : model === 'gemini'
-                              ? 'bg-blue-500 text-white'
-                              : 'bg-orange-500 text-white'
-                            : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-                        }`}
-                      >
-                        {model === 'openai' ? 'GPT-4o' : model === 'gemini' ? 'Gemini' : 'Claude'}
-                      </button>
-                    ))}
-                  </div>
                   <button
                     onClick={() => setStoryboardModalOpen(true)}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all shadow-sm bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-violet-500/20 hover:shadow-violet-500/40 hover:scale-105"
