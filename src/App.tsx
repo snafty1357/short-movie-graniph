@@ -200,7 +200,10 @@ const App: React.FC = () => {
 
       // Step 1: AIカット割り生成
       console.log('[AutoGenerate] Step 1: AIカット割り生成中...');
+      console.log('[AutoGenerate] Using AI model:', aiModel);
+      console.log('[AutoGenerate] Calling generateCutComposition...');
       const cutResult = await generateCutComposition(pdfText, reg, cutMeta, 7, aiModel);
+      console.log('[AutoGenerate] Cut generation completed!');
 
       // デバッグログ: AIからの生データを確認
       console.log('[AutoGenerate] AI Response cuts:', cutResult.cuts);

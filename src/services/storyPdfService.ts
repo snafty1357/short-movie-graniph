@@ -195,11 +195,15 @@ ${storyText}
 JSONのみを返してください。説明文は不要です。`;
 
   const endpoint = `/api/${aiModel}`;
+  const modelName = aiModel === 'openai' ? 'gpt-4o' : aiModel === 'gemini' ? 'gemini-2.5-flash' : 'claude-sonnet-4-20250514';
+  console.log('[generateCutComposition] Endpoint:', endpoint);
+  console.log('[generateCutComposition] Model:', modelName);
+
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: aiModel === 'openai' ? 'gpt-4o' : aiModel === 'gemini' ? 'gemini-2.5-flash' : 'claude-sonnet-4-20250514',
+      model: modelName,
       messages: [
         { role: 'system', content: systemMessage },
         { role: 'user', content: userMessage },
@@ -209,14 +213,19 @@ JSONのみを返してください。説明文は不要です。`;
     }),
   });
 
+  console.log('[generateCutComposition] Response status:', response.status);
+
   if (!response.ok) {
     const err = await response.text();
-    throw new Error(`OpenAI API Error: ${response.status} - ${err}`);
+    console.error('[generateCutComposition] Error:', err);
+    throw new Error(`API Error: ${response.status} - ${err}`);
   }
 
   const data = await response.json();
+  console.log('[generateCutComposition] Response data received');
+
   if (data.error) {
-    throw new Error(`OpenAI API Error: ${data.error.message}`);
+    throw new Error(`API Error: ${data.error.message}`);
   }
 
   const rawText = data.choices?.[0]?.message?.content;
