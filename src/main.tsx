@@ -2,9 +2,10 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App'
+import PublicHistory from './pages/PublicHistory'
 import { AuthProvider } from './contexts/AuthContext'
 import { ThemeProvider } from './contexts/ThemeContext'
-import { BrowserRouter } from 'react-router-dom'
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import React from 'react'
 
 class ErrorBoundary extends React.Component<
@@ -38,11 +39,27 @@ try {
     <StrictMode>
       <ErrorBoundary>
         <BrowserRouter>
-          <AuthProvider>
-            <ThemeProvider>
-              <App />
-            </ThemeProvider>
-          </AuthProvider>
+          <Routes>
+            {/* 公開ギャラリーページ - 認証不要 */}
+            <Route path="/gallery/:slug" element={
+              <ThemeProvider>
+                <PublicHistory />
+              </ThemeProvider>
+            } />
+            <Route path="/gallery" element={
+              <ThemeProvider>
+                <PublicHistory />
+              </ThemeProvider>
+            } />
+            {/* メインアプリ - 認証必要 */}
+            <Route path="/*" element={
+              <AuthProvider>
+                <ThemeProvider>
+                  <App />
+                </ThemeProvider>
+              </AuthProvider>
+            } />
+          </Routes>
         </BrowserRouter>
       </ErrorBoundary>
     </StrictMode>,
@@ -53,4 +70,3 @@ try {
     <pre>${e.message}\n${e.stack}</pre>
   </div>`;
 }
-

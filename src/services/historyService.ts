@@ -16,58 +16,71 @@ export interface HistoryEntry {
   generationTimeMs?: number; // 生成にかかった時間(ms)
 }
 
-const STORAGE_KEY = 'kiga_history';
 const MAX_ENTRIES = 50;
 
+import { supabase } from './supabaseClient';
+
 /**
- * 全履歴を取得
+ * Supabaseから全履歴を取得
  */
-export function getHistory(): HistoryEntry[] {
+export async function getHistory(userId?: string): Promise<HistoryEntry[]> {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as HistoryEntry[];
-    return parsed;
-  } catch {
-    console.warn('[History] Failed to parse history');
+    if (!userId) return [];
+    
+    const { data, error } = await supabase
+      .from('generations')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(MAX_ENTRIES);
+      
+    if (error) {
+      console.error('[History] Supabase fetch error:', error);
+      return [];
+    }
+    
+    if (!data) return [];
+    
+    return data.map(row => ({
+      id: row.id,
+      imageUrl: row.image_url || '',
+      timestamp: row.created_at,
+      description: row.description || '',
+      resolution: row.resolution || '1K',
+      format: row.format || 'png',
+      garmentLabels: row.garment_types || [],
+      generationTimeMs: row.generation_time_ms
+    }));
+  } catch (e) {
+    console.error('[History] Failed to parse history', e);
     return [];
   }
 }
 
-/**
- * 履歴に追加（先頭に追加、MAX_ENTRIES を超えたら古いものを削除）
- */
-export function addToHistory(entry: HistoryEntry): void {
-  try {
-    const history = getHistory();
-    history.unshift(entry);
-    // 上限を超えた分を削除
-    if (history.length > MAX_ENTRIES) {
-      history.splice(MAX_ENTRIES);
-    }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
-  } catch (e) {
-    console.warn('[History] Failed to save:', e);
-  }
-}
+
 
 /**
  * 特定の履歴を削除
  */
-export function removeFromHistory(id: string): void {
+export async function removeFromHistory(id: string): Promise<void> {
   try {
-    const history = getHistory().filter(h => h.id !== id);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+    const { error } = await supabase.from('generations').delete().eq('id', id);
+    if (error) console.error('[History] Delete error:', error);
   } catch (e) {
-    console.warn('[History] Failed to remove:', e);
+    console.error('[History] Failed to remove:', e);
   }
 }
 
 /**
- * 全履歴をクリア
+ * 全履歴を削除
  */
-export function clearHistory(): void {
-  localStorage.removeItem(STORAGE_KEY);
+export async function clearHistory(userId: string): Promise<void> {
+  try {
+    const { error } = await supabase.from('generations').delete().eq('user_id', userId);
+    if (error) console.error('[History] Clear all error:', error);
+  } catch (e) {
+    console.error('[History] Failed to clear history:', e);
+  }
 }
 
 /**

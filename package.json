@@ -5,13 +5,19 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "prebuild": "node -e \"const fs=require('fs'); const vars=['VITE_SUPABASE_URL','VITE_SUPABASE_ANON_KEY','VITE_FAL_KEY']; const content=vars.map(v=>process.env[v]?v+'='+process.env[v]:'').filter(Boolean).join('\\n'); if(content){fs.writeFileSync('.env',content);console.log('Created .env with',vars.filter(v=>process.env[v]).length,'vars'); console.log('ENV file contents:'); console.log(fs.readFileSync('.env','utf8'))}\"",
+    "build": "tsc -b && vite build --mode production",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.88.0",
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
     "@supabase/supabase-js": "^2.100.1",
+    "@vercel/node": "^5.7.3",
     "lucide-react": "^1.7.0",
+    "pdfjs-dist": "^5.6.205",
     "pg": "^8.20.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",

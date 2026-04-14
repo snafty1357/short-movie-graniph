@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import type { HistoryEntry } from '../services/historyService';
 import { getHistory, removeFromHistory, clearHistory } from '../services/historyService';
+import { useAuth } from '../contexts/AuthContext';
 
 interface HistoryPanelProps {
   isOpen: boolean;
@@ -8,18 +9,23 @@ interface HistoryPanelProps {
   onSelectEntry: (entry: HistoryEntry) => void;
   onReusePrompt: (prompt: string) => void;
 }
-
 const HistoryPanel: React.FC<HistoryPanelProps> = ({ isOpen, onClose, onSelectEntry, onReusePrompt }) => {
+  const { user } = useAuth();
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [zoomedEntry, setZoomedEntry] = useState<HistoryEntry | null>(null);
   const [viewingPromptId, setViewingPromptId] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
   // 履歴を読み込み
-  const loadHistory = useCallback(() => {
-    setEntries(getHistory());
-  }, []);
+  const loadHistory = useCallback(async () => {
+    if (!user) return;
+    setIsLoading(true);
+    const data = await getHistory(user.id);
+    setEntries(data);
+    setIsLoading(false);
+  }, [user]);
 
   useEffect(() => {
     if (isOpen) {
@@ -29,22 +35,23 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({ isOpen, onClose, onSelectEn
   }, [isOpen, loadHistory]);
 
   // 個別削除
-  const handleDelete = useCallback((id: string, e: React.MouseEvent) => {
+  const handleDelete = useCallback(async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    removeFromHistory(id);
+    await removeFromHistory(id);
     setEntries(prev => prev.filter(h => h.id !== id));
   }, []);
 
   // 全削除
-  const handleClearAll = useCallback(() => {
+  const handleClearAll = useCallback(async () => {
     if (!confirmClear) {
       setConfirmClear(true);
       return;
     }
-    clearHistory();
+    if (!user) return;
+    await clearHistory(user.id);
     setEntries([]);
     setConfirmClear(false);
-  }, [confirmClear]);
+  }, [confirmClear, user]);
 
   // 検索クエリで絞り込み
   const filteredEntries = useMemo(() => {
@@ -148,7 +155,15 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({ isOpen, onClose, onSelectEn
 
         {/* Content */}
         <div className="overflow-y-auto h-[calc(100%-120px)] px-5 py-4">
-          {entries.length === 0 ? (
+          {isLoading ? (
+            <div className="flex flex-col items-center justify-center h-full text-[#78909C]">
+              <svg className="animate-spin h-6 w-6 mb-3" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <p className="text-xs">履歴を読み込み中...</p>
+            </div>
+          ) : entries.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center">
               <div className="text-5xl mb-4 opacity-15">🕐</div>
               <p className="text-[#555] text-sm">履歴がありません</p>

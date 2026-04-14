@@ -1,126 +1,410 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import ImageUploader from './components/ImageUploader';
-import ResultGallery, { generateProjectId } from './components/ResultGallery';
-import type { ResultItem } from './components/ResultGallery';
-import PromptModal from './components/PromptModal';
-import TryOnPromptModal from './components/TryOnPromptModal';
+import ResultGallery, { type ResultItem } from './components/ResultGallery';
+import ShortVideoModal, { type CutItem, DEFAULT_CUTS } from './components/ShortVideoModal';
 import { useAuth } from './contexts/AuthContext';
-import { generateTryOn, fileToDataUrl, type Resolution, type ImageFormat } from './services/falService';
-import { generateQuestions, generatePromptFromAnswers, optimizeTryOnPrompt, parsePrompt, analyzeGarmentWithChatGPT, analyzeGarment, describeGarment, analyzePose, type Question, type GarmentAnalysis, type PoseAnalysisResult } from './services/openaiService';
 import { useTheme } from './contexts/ThemeContext';
-import { supabase } from './services/supabaseClient';
-import { getDeviceId, addToHistory } from './services/historyService';
-import HistoryPanel from './components/HistoryPanel';
-import { useLocation, useNavigate } from 'react-router-dom';
+import AuthForm from './components/AuthForm';
+import StoryPdfUploader from './components/StoryPdfUploader';
+import StoryboardWorkflowModal from './components/StoryboardWorkflowModal';
 
-import { Shirt, Layers, Shield, Scissors, Star, Footprints, Watch, User, FlipHorizontal, Sun, Moon } from 'lucide-react';
+import { User, Users, Sun, Moon, UserCircle, RotateCcw, Pencil, ChevronDown, Sparkles, Image as ImageIcon, Loader2, Upload, Play, BookOpen } from 'lucide-react';
+import { generatePose, fileToDataUrl } from './services/falService';
+import { generateFixedElements, generateCutComposition, compositionRowToCutItem, DEFAULT_FIXED_META_PROMPT, DEFAULT_REGULATION, type AiModelType } from './services/storyPdfService';
 
-// アイテムカテゴリの定義
-interface GarmentItem {
-  id: string;
-  label: string;
-  icon: React.ReactNode;
-  accentColor: string;
-  hint: string;
-  // 正面
-  file: File | null;
-  preview: string | null;
-  // 背面
-  backFile: File | null;
-  backPreview: string | null;
-  description: string;
-  analysis: GarmentAnalysis | null;  // AI分析結果
-}
 
-const initialGarments: Omit<GarmentItem, 'file' | 'preview' | 'backFile' | 'backPreview' | 'description' | 'analysis'>[] = [
-  { id: 'top', label: 'トップス', icon: <Shirt size={24} strokeWidth={1.5} />, accentColor: '#00BFA5', hint: '白背景の服単体が最適' },
-  { id: 'inner', label: 'インナー', icon: <Layers size={24} strokeWidth={1.5} />, accentColor: '#78909C', hint: 'シャツ・肌着・キャミソール等' },
-  { id: 'outer', label: 'アウター', icon: <Shield size={24} strokeWidth={1.5} />, accentColor: '#00BFA5', hint: 'ジャケット・コート等' },
-  { id: 'bottom', label: 'ボトムス', icon: <Scissors size={24} strokeWidth={1.5} />, accentColor: '#78909C', hint: 'ズボン・スカート等' },
-  { id: 'dress', label: 'ワンピース/セットアップ', icon: <Star size={24} strokeWidth={1.5} />, accentColor: '#00BFA5', hint: '全身つながっている服' },
-  { id: 'shoes', label: 'シューズ', icon: <Footprints size={24} strokeWidth={1.5} />, accentColor: '#78909C', hint: '靴単体の画像' },
-  { id: 'accessory', label: 'アクセサリー', icon: <Watch size={24} strokeWidth={1.5} />, accentColor: '#00BFA5', hint: '時計・バッグ・帽子等' },
-];
 
 const App: React.FC = () => {
   const { user, loading, signOut } = useAuth();
   const { theme, toggleTheme } = useTheme();
-  
-  const location = useLocation();
-  const navigate = useNavigate();
 
   // モデル画像（正面）
   const [humanFile, setHumanFile] = useState<File | null>(null);
   const [humanPreview, setHumanPreview] = useState<string | null>(null);
-  // モデル画像（背面）
-  const [_humanBackFile, setHumanBackFile] = useState<File | null>(null);
-  const [humanBackPreview, setHumanBackPreview] = useState<string | null>(null);
 
-  // 各ガーメントのステート
-  const [garments, setGarments] = useState<GarmentItem[]>(
-    initialGarments.map(g => ({ ...g, file: null, preview: null, backFile: null, backPreview: null, description: '', analysis: null }))
-  );
+  // サブキャラクター画像
+  const [subCharFile, setSubCharFile] = useState<File | null>(null);
+  const [subCharPreview, setSubCharPreview] = useState<string | null>(null);
 
-  // 現在選択中のガーメント（説明編集用）
-  const [activeGarmentId, setActiveGarmentId] = useState<string>('top');
+  // サブキャラクタープロンプト設定
+  const SUB_CHAR_PRESETS = [
+    { id: 'expressionless', label: '無表情固定', prompt: 'always expressionless, blank face, no emotion' },
+    { id: 'no_fingers', label: '手に指はない', prompt: 'hands without fingers, mitten-like hands, no individual fingers' },
+    { id: 'no_protagonist', label: '主役化禁止', prompt: 'always in background, never the main subject, supporting role only' },
+    { id: 'invisible', label: '人物からは見えない', prompt: 'invisible to other characters, unnoticed presence, ghost-like existence' },
+    { id: 'physical', label: '物理干渉可能', prompt: 'can interact with physical objects, touching and moving things' },
+    { id: 'size_20cm', label: 'サイズ20cm', prompt: 'tiny character approximately 20cm tall, miniature figure scale' },
+  ] as const;
 
-  // 表裏切り替え（front/back）
-  const [viewSide, setViewSide] = useState<'front' | 'back'>('front');
 
-  // ポーズ指定
-  const [selectedPose, setSelectedPose] = useState<string>('');
-  const [isAnalyzingPose, setIsAnalyzingPose] = useState(false);
-  const [poseQuestionResult, setPoseQuestionResult] = useState<PoseAnalysisResult | null>(null);
-  const poseInputRef = useRef<HTMLInputElement>(null);
 
-  // プロンプトモーダル
-  const [promptModalOpen, setPromptModalOpen] = useState(false);
-  const [pendingGarmentId, setPendingGarmentId] = useState<string | null>(null);
-  const [pendingGarmentFile, setPendingGarmentFile] = useState<File | null>(null);
-  const [pendingGarmentPreview, setPendingGarmentPreview] = useState<string | null>(null);
-  const [pendingGarmentSide, setPendingGarmentSide] = useState<'front' | 'back'>('front');
+  const [activeSubTags, setActiveSubTags] = useState<Set<string>>(new Set(SUB_CHAR_PRESETS.map(p => p.id)));
+  const [customSubPrompt, setCustomSubPrompt] = useState('');
+  const [mainCharPrompt, setMainCharPrompt] = useState('');
 
-  // 解像度と出力形式
-  const [resolution, setResolution] = useState<Resolution>('1K');
-  const [imageFormat, setImageFormat] = useState<ImageFormat>('png');
-
-  // 分析AIプロバイダー
-  type AIProvider = 'gemini' | 'chatgpt';
-  const [analysisAI, setAnalysisAI] = useState<AIProvider>('chatgpt');
+  // サブキャラ用プロンプト生成
+  const subCharPrompt = [
+    ...SUB_CHAR_PRESETS.filter(p => activeSubTags.has(p.id)).map(p => p.prompt),
+    ...(customSubPrompt.trim() ? [customSubPrompt.trim()] : []),
+  ].join(', ');
 
   // UI状態
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<ResultItem[]>([]);
 
-  // TryOnPromptModal状態
-  const [tryOnModalOpen, setTryOnModalOpen] = useState(false);
-  const [isGeneratingQuestions, setIsGeneratingQuestions] = useState(false);
-  const [reusedPrompt, setReusedPrompt] = useState<string | undefined>(undefined);
-  
-  // 履歴パネル
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  // カット構成ステート
+  const [cuts, setCuts] = useState<CutItem[]>(DEFAULT_CUTS.map(c => ({ ...c })));
 
-  // 使用量トラッキング
-  const [usageStats, setUsageStats] = useState({
-    generations: 0,      // 着画生成回数
-    analyses: 0,         // Gemini分析回数
-    optimizations: 0,    // 説明最適化回数
-    chatgptCalls: 0,     // ChatGPT呼び出し回数
-  });
+  // --- カット編集ロジック ---
+  const [editingCutId, setEditingCutId] = useState<number | null>(null);
+  const [stillImageStyle, setStillImageStyle] = useState('masterpiece, 8k resolution, highly detailed, photorealistic, cinematic lighting');
+  const [stillImageNegative, setStillImageNegative] = useState('');
+  const [stillImageMetaPrompt, setStillImageMetaPrompt] = useState('動画の全体的な品質やルック＆フィールを定義するスタイリングプロンプトを指定してください。');
+  const [semanticPrompt, setSemanticPrompt] = useState('1 状況把握\n2 重さ提示\n3 重さの深化\n4 ズレ発生\n5 軽さ提示\n6 解放\n7 余韻');
+  const [productPrompt, setProductPrompt] = useState('');
+  const [stagePrompt, setStagePrompt] = useState<string>(''); // used for fixed elements now
+  const [extractedPdfText, setExtractedPdfText] = useState('');
+  const [fixedElementMetaPrompt, setFixedElementMetaPrompt] = useState(DEFAULT_FIXED_META_PROMPT);
+  const [isGeneratingFixed, setIsGeneratingFixed] = useState(false);
+  const [aiModel, setAiModel] = useState<AiModelType>('openai');
+  
+  const [stillPromptPanelOpen, setStillPromptPanelOpen] = useState(false);
+  const stillPromptPanelRef = useRef<HTMLDivElement>(null);
+  const [stillMetaPanelOpen, setStillMetaPanelOpen] = useState(false);
+  const [semanticPanelOpen, setSemanticPanelOpen] = useState(false);
+  const semanticPanelRef = useRef<HTMLDivElement>(null);
+  const [productPanelOpen, setProductPanelOpen] = useState(false);
+  const productPanelRef = useRef<HTMLDivElement>(null);
+  const [fixedPanelOpen, setFixedPanelOpen] = useState(false);
+  const fixedPanelRef = useRef<HTMLDivElement>(null);
+
+  // Video Generation Settings
+  const [videoGenModel, setVideoGenModel] = useState<string>('luma');
+  const [videoPromptStyle, setVideoPromptStyle] = useState('masterpiece, 8k resolution, highly detailed, smooth motion, high fps');
+  const [videoPromptNegative, setVideoPromptNegative] = useState('');
+  const [videoMetaPrompt, setVideoMetaPrompt] = useState('動画ジェネレーターに渡すモーション指示やスタイルのベースルールを入力してください。');
+  const [videoPromptPanelOpen, setVideoPromptPanelOpen] = useState(false);
+  const [videoMetaPanelOpen, setVideoMetaPanelOpen] = useState(false);
+
+  const enabledCuts = cuts.filter(c => c.enabled);
+
+  useEffect(() => {
+    const savedFixedMeta = localStorage.getItem('snafty_fixed_meta_prompt');
+    if (savedFixedMeta) {
+      setFixedElementMetaPrompt(savedFixedMeta);
+    }
+    const savedAiModel = localStorage.getItem('snafty_ai_model') as AiModelType;
+    if (savedAiModel === 'openai' || savedAiModel === 'gemini' || savedAiModel === 'claude') {
+      setAiModel(savedAiModel);
+    }
+
+    // Load still image & video prompts
+    const stStyle = localStorage.getItem('snafty_still_style');
+    const stNeg = localStorage.getItem('snafty_still_negative');
+    const stMeta = localStorage.getItem('snafty_still_meta_prompt');
+    const vidModel = localStorage.getItem('snafty_video_model');
+    const vidStyle = localStorage.getItem('snafty_video_style');
+    const vidNeg = localStorage.getItem('snafty_video_negative');
+    const vidMeta = localStorage.getItem('snafty_video_meta_prompt');
+    
+    if (stStyle !== null) setStillImageStyle(stStyle);
+    if (stNeg !== null) setStillImageNegative(stNeg);
+    if (stMeta !== null) setStillImageMetaPrompt(stMeta);
+    if (vidModel !== null) setVideoGenModel(vidModel);
+    if (vidStyle !== null) setVideoPromptStyle(vidStyle);
+    if (vidNeg !== null) setVideoPromptNegative(vidNeg);
+    if (vidMeta !== null) setVideoMetaPrompt(vidMeta);
+  }, []);
+
+  const saveStillPrompts = () => {
+    localStorage.setItem('snafty_still_style', stillImageStyle);
+    localStorage.setItem('snafty_still_negative', stillImageNegative);
+    alert('静止画プロンプト設定を保存しました。');
+  };
+
+  const saveVideoPrompts = () => {
+    localStorage.setItem('snafty_video_model', videoGenModel);
+    localStorage.setItem('snafty_video_style', videoPromptStyle);
+    localStorage.setItem('snafty_video_negative', videoPromptNegative);
+    alert('動画生成プロンプト設定を保存しました。');
+  };
+
+  const saveVideoMetaPrompt = () => {
+    localStorage.setItem('snafty_video_meta_prompt', videoMetaPrompt);
+    alert('動画生用のプロンプト指示（メタ）を保存しました。');
+  };
+
+  const saveStillMetaPrompt = () => {
+    localStorage.setItem('snafty_still_meta_prompt', stillImageMetaPrompt);
+    alert('静止画用のプロンプト指示（メタ）を保存しました。');
+  };
+
+  const toggleCut = (id: number) => {
+    setCuts(prev => prev.map(c => c.id === id ? { ...c, enabled: !c.enabled } : c));
+  };
+
+
+
+  const updateCutField = (id: number, field: 'title' | 'prompt' | 'camera' | 'semanticPrompt', value: string) => {
+    setCuts(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c));
+  };
+
+  const resetCuts = () => {
+    setCuts(DEFAULT_CUTS.map(c => ({ ...c })));
+    setEditingCutId(null);
+  };
+
+
+
+  const handleUploadCutImage = (cutId: number, file: File) => {
+    const url = URL.createObjectURL(file);
+    setCuts(prev => prev.map(c => c.id === cutId ? { ...c, generatedImageUrl: url } : c));
+  };
+
+  const handleGenerateFixedElements = async () => {
+    if (!extractedPdfText) {
+      alert("先にPDFをアップロードして簡易ストーリーを抽出してください。");
+      return;
+    }
+    
+    setIsGeneratingFixed(true);
+    try {
+      const reg = localStorage.getItem('snafty_regulation') || DEFAULT_REGULATION;
+      const cutMeta = localStorage.getItem('snafty_meta_prompt') || '';
+      
+      const generated = await generateFixedElements(
+        extractedPdfText,
+        reg,
+        cutMeta,
+        fixedElementMetaPrompt,
+        aiModel
+      );
+      setStagePrompt(generated);
+    } catch (err: any) {
+      console.error(err);
+      alert('要素固定シートの生成に失敗しました: ' + err.message);
+    } finally {
+      setIsGeneratingFixed(false);
+    }
+  };
+
+  // ─── PDF自動生成フロー ───
+  const handleFullAutoGenerate = async (pdfText: string) => {
+    try {
+      // Step 1: 要素固定プロンプト生成
+      console.log('[AutoGenerate] Step 1: 要素固定プロンプト生成中...');
+      setIsGeneratingFixed(true);
+      const reg = localStorage.getItem('snafty_regulation') || DEFAULT_REGULATION;
+      const cutMeta = localStorage.getItem('snafty_meta_prompt') || '';
+
+      const generatedFixed = await generateFixedElements(
+        pdfText,
+        reg,
+        cutMeta,
+        fixedElementMetaPrompt,
+        aiModel
+      );
+      setStagePrompt(generatedFixed);
+      setIsGeneratingFixed(false);
+
+      // Step 2: 静止画プロンプト生成（AIで自動生成）
+      console.log('[AutoGenerate] Step 2: 静止画プロンプト生成中...');
+      const stillPromptResponse = await fetch('/api/openai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gpt-4o',
+          messages: [
+            {
+              role: 'system',
+              content: 'あなたは映像制作の専門家です。ストーリーに基づいて、静止画生成用のスタイルプロンプトを作成してください。'
+            },
+            {
+              role: 'user',
+              content: `以下のストーリーに最適な静止画スタイルプロンプトを作成してください。
+
+ストーリー概要:
+${pdfText.substring(0, 1000)}
+
+要素固定プロンプト:
+${generatedFixed}
+
+以下の形式で回答してください（1行で、カンマ区切り）:
+masterpiece, 8k resolution, highly detailed, [ストーリーに合った追加スタイル]`
+            }
+          ],
+          max_tokens: 200
+        })
+      });
+
+      if (stillPromptResponse.ok) {
+        const stillData = await stillPromptResponse.json();
+        const stillStyle = stillData.choices?.[0]?.message?.content?.trim() || stillImageStyle;
+        setStillImageStyle(stillStyle);
+      }
+
+      // Step 3: AIカット割り生成
+      console.log('[AutoGenerate] Step 3: AIカット割り生成中...');
+      const cutResult = await generateCutComposition(pdfText, reg, cutMeta, 7, aiModel);
+      const newCuts = cutResult.cuts.map((row, i) => compositionRowToCutItem(row, i));
+      setCuts(newCuts);
+      setEditingCutId(null);
+
+      console.log('[AutoGenerate] 完了！');
+    } catch (err: any) {
+      console.error('[AutoGenerate] Error:', err);
+      throw err;
+    }
+  };
+
+  const generateImageForCut = async (cutId: number) => {
+    if (!humanFile) {
+      alert("上のセクションでメインモデルの画像を設定してください。");
+      return;
+    }
+    const targetCut = cuts.find(c => c.id === cutId);
+    if (!targetCut) return;
+
+    setCuts(prev => prev.map(c => c.id === cutId ? { ...c, isGenerating: true, errorMessage: undefined } : c));
+
+    try {
+      const humanDataUrl = await fileToDataUrl(humanFile);
+      let finalPrompt = targetCut.camera ? `Camera angle: ${targetCut.camera}. ${targetCut.prompt}` : targetCut.prompt;
+      if (mainCharPrompt) {
+        finalPrompt = `${mainCharPrompt}, ${finalPrompt}`;
+      }
+      const combinedBase = [stillImageStyle, stagePrompt].filter(Boolean).join(', ');
+      if (combinedBase) {
+        finalPrompt = `${combinedBase}, ${finalPrompt}`;
+      }
+      if (stillImageNegative) {
+        finalPrompt += ` (negative: ${stillImageNegative})`;
+      }
+      if (targetCut.showSub && subCharFile && subCharPrompt) {
+        finalPrompt += `, with a small companion character: ${subCharPrompt}`;
+      }
+      const result = await generatePose({
+        humanImageUrl: humanDataUrl,
+        pose: finalPrompt,
+        resolution: '1K',
+        format: 'jpeg',
+      });
+      
+      setCuts(prev => prev.map(c => c.id === cutId ? { 
+        ...c, 
+        isGenerating: false, 
+        generatedImageUrl: result.imageUrl 
+      } : c));
+
+    } catch (err: any) {
+      console.error(`Cut ${cutId} generation error:`, err);
+      setCuts(prev => prev.map(c => c.id === cutId ? { ...c, isGenerating: false, errorMessage: err.message || '生成失敗' } : c));
+    }
+  };
+
+  // 全カットの画像を一括生成
+  const generateAllCutImages = async () => {
+    if (!humanFile) {
+      alert('メインキャラクター（モデル画像）を設定してください。');
+      return;
+    }
+
+    const enabledCutsToGenerate = cuts.filter(c => c.enabled);
+    if (enabledCutsToGenerate.length === 0) {
+      alert('有効なカットがありません。');
+      return;
+    }
+
+    setIsGenerating(true);
+    setError(null);
+
+    try {
+      const humanDataUrl = await fileToDataUrl(humanFile);
+      const combinedBase = [stillImageStyle, stagePrompt].filter(Boolean).join(', ');
+
+      for (const cut of enabledCutsToGenerate) {
+        // Mark this cut as generating
+        setCuts(prev => prev.map(c => c.id === cut.id ? { ...c, isGenerating: true, errorMessage: undefined } : c));
+
+        try {
+          let finalPrompt = cut.camera ? `Camera angle: ${cut.camera}. ${cut.prompt}` : cut.prompt;
+          if (mainCharPrompt) {
+            finalPrompt = `${mainCharPrompt}, ${finalPrompt}`;
+          }
+          if (combinedBase) {
+            finalPrompt = `${combinedBase}, ${finalPrompt}`;
+          }
+          if (stillImageNegative) {
+            finalPrompt += ` (negative: ${stillImageNegative})`;
+          }
+          if (cut.showSub && subCharFile && subCharPrompt) {
+            finalPrompt += `, with a small companion character: ${subCharPrompt}`;
+          }
+
+          const result = await generatePose({
+            humanImageUrl: humanDataUrl,
+            pose: finalPrompt,
+            resolution: '1K',
+            format: 'jpeg',
+          });
+
+          setCuts(prev => prev.map(c => c.id === cut.id ? {
+            ...c,
+            isGenerating: false,
+            generatedImageUrl: result.imageUrl
+          } : c));
+        } catch (err: any) {
+          console.error(`Cut ${cut.id} generation error:`, err);
+          setCuts(prev => prev.map(c => c.id === cut.id ? { ...c, isGenerating: false, errorMessage: err.message || '生成失敗' } : c));
+        }
+      }
+    } catch (err: any) {
+      console.error('Batch generation error:', err);
+      setError(err.message || '画像生成中にエラーが発生しました');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  // キャラクター設定パネル外側クリック検知状態
+  const [charPanelOpen, setCharPanelOpen] = useState(false);
+  const [characterConfirmed, setCharacterConfirmed] = useState(false);
+  const charPanelRef = useRef<HTMLDivElement>(null);
+
+  // Click outside to close character panel
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (charPanelRef.current && !charPanelRef.current.contains(e.target as Node)) {
+        setCharPanelOpen(false);
+      }
+      if (stillPromptPanelRef.current && !stillPromptPanelRef.current.contains(e.target as Node)) {
+        setStillPromptPanelOpen(false);
+      }
+
+      if (semanticPanelRef.current && !semanticPanelRef.current.contains(e.target as Node)) {
+        setSemanticPanelOpen(false);
+      }
+      if (productPanelRef.current && !productPanelRef.current.contains(e.target as Node)) {
+        setProductPanelOpen(false);
+      }
+      if (fixedPanelRef.current && !fixedPanelRef.current.contains(e.target as Node)) {
+        setFixedPanelOpen(false);
+      }
+    };
+    if (charPanelOpen || stillPromptPanelOpen || semanticPanelOpen || productPanelOpen || fixedPanelOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [charPanelOpen, stillPromptPanelOpen, semanticPanelOpen, productPanelOpen, fixedPanelOpen]);
+
+  // VideoModal状態
+  const [videoModalOpen, setVideoModalOpen] = useState(false);
+  const [storyboardModalOpen, setStoryboardModalOpen] = useState(false);
 
   // タブタイトルアニメーション
-  const originalTitle = useRef('着てみるAI - バーチャル試着');
+  const originalTitle = useRef('ショート動画AI - 自動生成');
   const titleIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // URLルーターと履歴パネル状態の同期
-  useEffect(() => {
-    if (location.pathname === '/history') {
-      setIsHistoryOpen(true);
-    } else {
-      setIsHistoryOpen(false);
-    }
-  }, [location.pathname]);
 
   useEffect(() => {
     if (isGenerating) {
@@ -160,35 +444,7 @@ const App: React.FC = () => {
     prevResultsCount.current = results.length;
   }, [results.length]);
 
-  // コスト計算（概算）
-  const calculateCost = () => {
-    // Fal.ai Nanobanana2 着画生成コスト（解像度別）
-    // Base(1K): ~$0.08, 2K: ~$0.12, 4K: ~$0.16
-    const falCostPerGen: Record<Resolution, number> = {
-      '1K': 0.08,  // $0.08/生成
-      '2K': 0.12,  // $0.12/生成
-      '4K': 0.16,  // $0.16/生成
-    };
 
-    // Gemini API コスト（概算）
-    const geminiCostPerCall = 0.0005; // $0.0005/呼び出し
-
-    // ChatGPT API コスト（概算）
-    const chatgptCostPerCall = 0.002; // $0.002/呼び出し
-
-    const falCost = usageStats.generations * falCostPerGen[resolution];
-    const geminiCost = (usageStats.analyses + usageStats.optimizations) * geminiCostPerCall;
-    const chatgptCost = usageStats.chatgptCalls * chatgptCostPerCall;
-
-    return {
-      fal: falCost,
-      gemini: geminiCost,
-      chatgpt: chatgptCost,
-      total: falCost + geminiCost + chatgptCost,
-    };
-  };
-
-  const cost = calculateCost();
 
   // モデル画像選択（正面）
   const handleHumanSelect = useCallback(async (file: File) => {
@@ -197,297 +453,14 @@ const App: React.FC = () => {
     setHumanPreview(url);
   }, []);
 
-  // モデル画像選択（背面）
-  const handleHumanBackSelect = useCallback(async (file: File) => {
-    setHumanBackFile(file);
+  // サブキャラクター画像選択
+  const handleSubCharSelect = useCallback(async (file: File) => {
+    setSubCharFile(file);
     const url = URL.createObjectURL(file);
-    setHumanBackPreview(url);
+    setSubCharPreview(url);
   }, []);
 
-  // ガーメント画像選択（正面）- モーダル表示
-  const handleGarmentSelect = useCallback((id: string) => async (file: File) => {
-    const url = URL.createObjectURL(file);
-    setPendingGarmentId(id);
-    setPendingGarmentFile(file);
-    setPendingGarmentPreview(url);
-    setPendingGarmentSide('front');
-    setPromptModalOpen(true);
-    setActiveGarmentId(id);
-  }, []);
 
-  // ガーメント画像選択（背面）- モーダル表示
-  const handleGarmentBackSelect = useCallback((id: string) => async (file: File) => {
-    const url = URL.createObjectURL(file);
-    setPendingGarmentId(id);
-    setPendingGarmentFile(file);
-    setPendingGarmentPreview(url);
-    setPendingGarmentSide('back');
-    setPromptModalOpen(true);
-    setActiveGarmentId(id);
-  }, []);
-
-  // モーダルで説明を確定（分析結果も保存）
-  const handlePromptSubmit = useCallback((description: string, analysis?: GarmentAnalysis) => {
-    if (!pendingGarmentId || !pendingGarmentFile || !pendingGarmentPreview) return;
-
-    if (pendingGarmentSide === 'front') {
-      setGarments(prev => prev.map(g =>
-        g.id === pendingGarmentId
-          ? { ...g, file: pendingGarmentFile, preview: pendingGarmentPreview, description, analysis: analysis || null }
-          : g
-      ));
-    } else {
-      setGarments(prev => prev.map(g =>
-        g.id === pendingGarmentId
-          ? { ...g, backFile: pendingGarmentFile, backPreview: pendingGarmentPreview }
-          : g
-      ));
-    }
-
-    // リセット
-    setPendingGarmentId(null);
-    setPendingGarmentFile(null);
-    setPendingGarmentPreview(null);
-  }, [pendingGarmentId, pendingGarmentFile, pendingGarmentPreview, pendingGarmentSide]);
-
-  // モーダルでAI最適化
-  const handlePromptOptimize = useCallback(async (): Promise<string> => {
-    if (!pendingGarmentFile) return '';
-    const base64 = await fileToDataUrl(pendingGarmentFile);
-    const desc = await describeGarment(base64);
-    setUsageStats(prev => ({ ...prev, optimizations: prev.optimizations + 1 }));
-    return desc;
-  }, [pendingGarmentFile]);
-
-  // モーダルでAI分析（選択されたAIを使用）
-  const handlePromptAnalyze = useCallback(async () => {
-    if (!pendingGarmentFile) throw new Error('No file');
-    const base64 = await fileToDataUrl(pendingGarmentFile);
-
-    let result;
-    if (analysisAI === 'chatgpt') {
-      result = await analyzeGarmentWithChatGPT(base64);
-      setUsageStats(prev => ({ ...prev, chatgptCalls: prev.chatgptCalls + 1 }));
-    } else {
-      result = await analyzeGarment(base64);
-      setUsageStats(prev => ({ ...prev, analyses: prev.analyses + 1 }));
-    }
-    return result;
-  }, [pendingGarmentFile, analysisAI]);
-
-  // ガーメントクリア（正面）
-  const handleGarmentClear = useCallback((id: string) => () => {
-    setGarments(prev => prev.map(g =>
-      g.id === id ? { ...g, file: null, preview: null } : g
-    ));
-  }, []);
-
-  // ガーメントクリア（背面）
-  const handleGarmentBackClear = useCallback((id: string) => () => {
-    setGarments(prev => prev.map(g =>
-      g.id === id ? { ...g, backFile: null, backPreview: null } : g
-    ));
-  }, []);
-
-  // アップロード済みのガーメントを取得
-  const uploadedGarments = garments.filter(g => g.file !== null);
-
-  // 着画生成ボタンクリック時 - モーダルを開く
-  const handleOpenTryOnModal = useCallback(() => {
-    if (!humanFile || uploadedGarments.length === 0) return;
-    setTryOnModalOpen(true);
-  }, [humanFile, uploadedGarments]);
-
-  // 分析結果を詳細な説明文に変換
-  const analysisToDescription = (analysis: GarmentAnalysis | null): string => {
-    if (!analysis) return '';
-
-    const parts: string[] = [];
-    if (analysis.type) parts.push(`Type: ${analysis.type}`);
-    if (analysis.color) parts.push(`Color: ${analysis.color}`);
-    if (analysis.pattern && analysis.pattern !== '無地') parts.push(`Pattern: ${analysis.pattern}`);
-    if (analysis.buttons && analysis.buttons !== 'なし') parts.push(`Buttons: ${analysis.buttons}`);
-    if (analysis.pockets && analysis.pockets !== 'なし') parts.push(`Pockets: ${analysis.pockets}`);
-    if (analysis.collar && analysis.collar !== 'なし') parts.push(`Collar: ${analysis.collar}`);
-    if (analysis.sleeves) parts.push(`Sleeves: ${analysis.sleeves}`);
-    if (analysis.material && analysis.material !== '不明') parts.push(`Material: ${analysis.material}`);
-    if (analysis.decorations && analysis.decorations !== '特になし') parts.push(`Decorations: ${analysis.decorations}`);
-    if (analysis.extra) parts.push(`Additional: ${analysis.extra}`);
-
-    return parts.join('. ');
-  };
-
-  // ChatGPTで質問を生成
-  const handleGenerateQuestions = useCallback(async (): Promise<Question[]> => {
-    if (!humanFile || uploadedGarments.length === 0) return [];
-
-    setIsGeneratingQuestions(true);
-    try {
-      const humanDataUrl = await fileToDataUrl(humanFile);
-      let allQuestions: Question[] = [];
-
-      // 各アイテムごとに質問を生成
-      for (const garment of uploadedGarments) {
-        const garmentDataUrl = await fileToDataUrl(garment.file!);
-        const desc = garment.description || garment.label;
-        const analysisDesc = analysisToDescription(garment.analysis);
-        const fullDesc = analysisDesc ? `${desc} [${analysisDesc}]` : desc;
-
-        const questions = await generateQuestions(humanDataUrl, garmentDataUrl, fullDesc || undefined, selectedPose);
-        
-        // アイテムラベルを付与して結合
-        const taggedQuestions = questions.map(q => ({
-          ...q,
-          id: `${garment.id}_${q.id}`,
-          garmentLabel: garment.label
-        }));
-        
-        allQuestions = [...allQuestions, ...taggedQuestions];
-        setUsageStats(prev => ({ ...prev, chatgptCalls: prev.chatgptCalls + 1 }));
-      }
-
-      return allQuestions;
-    } catch (e: any) {
-      console.error('Question generation error:', e);
-      throw e;
-    } finally {
-      setIsGeneratingQuestions(false);
-    }
-  }, [humanFile, uploadedGarments]);
-
-  // 回答からプロンプトを生成
-  const handleGeneratePromptFromAnswers = useCallback(async (questions: Question[]): Promise<string> => {
-    if (!humanFile || uploadedGarments.length === 0) return '';
-
-    try {
-      const humanDataUrl = await fileToDataUrl(humanFile);
-      const primaryGarment = uploadedGarments[0];
-      const garmentDataUrl = await fileToDataUrl(primaryGarment.file!);
-
-      // 全アイテムの説明と分析結果を結合（詳細に）
-      const combinedDescription = uploadedGarments
-        .map(g => {
-          const analysisDesc = analysisToDescription(g.analysis);
-          const desc = g.description || g.label;
-          return analysisDesc ? `${desc} [GARMENT DETAILS: ${analysisDesc}]` : desc;
-        })
-        .join('; ');
-
-      const prompt = await generatePromptFromAnswers(
-        humanDataUrl,
-        garmentDataUrl,
-        questions,
-        combinedDescription || undefined,
-        selectedPose
-      );
-      setUsageStats(prev => ({ ...prev, chatgptCalls: prev.chatgptCalls + 1 }));
-      return prompt;
-    } catch (e: any) {
-      console.error('Prompt generation error:', e);
-      throw e;
-    }
-  }, [humanFile, uploadedGarments]);
-
-  // プロンプト最適化
-  const handleOptimizeTryOnPrompt = useCallback(async (prompt: string): Promise<string> => {
-    try {
-      const result = await optimizeTryOnPrompt(prompt);
-      setUsageStats(prev => ({ ...prev, chatgptCalls: prev.chatgptCalls + 1 }));
-      return result;
-    } catch (e: any) {
-      console.error('Prompt optimization error:', e);
-      return prompt;
-    }
-  }, []);
-
-  // 着画生成（プロンプト指定）
-  const handleGenerateWithPrompt = useCallback(async (fullPrompt: string) => {
-    if (!humanFile || uploadedGarments.length === 0) return;
-
-    setIsGenerating(true);
-    setError(null);
-
-    try {
-      console.log('[Generate] Starting generation...');
-      const humanDataUrl = await fileToDataUrl(humanFile);
-      console.log('[Generate] Human image size:', Math.round(humanDataUrl.length / 1024), 'KB');
-
-      // 各ガーメントごとに生成（現在のAPIは1つずつ）
-      // メインのガーメント（上着優先）で生成
-      const primaryGarment = uploadedGarments[0];
-      const garmentDataUrl = await fileToDataUrl(primaryGarment.file!);
-      console.log('[Generate] Garment image size:', Math.round(garmentDataUrl.length / 1024), 'KB');
-
-      // プロンプトをポジティブ/ネガティブに分離
-      const { positive, negative } = parsePrompt(fullPrompt);
-      console.log('[Generate] Positive prompt:', positive?.substring(0, 100));
-
-      const startTime = Date.now();
-      const result = await generateTryOn({
-        humanImageUrl: humanDataUrl,
-        garmentImageUrl: garmentDataUrl,
-        description: positive || undefined,
-        negativePrompt: negative || undefined,
-        resolution,
-        format: imageFormat,
-        pose: selectedPose || undefined,
-      });
-      const endTime = Date.now();
-      const generationTimeMs = endTime - startTime;
-
-      console.log('[Generate] Result:', result.imageUrl?.substring(0, 100));
-      console.log(`[Generate] Time: ${generationTimeMs}ms`);
-
-      const newResult: ResultItem = {
-        id: Date.now().toString(),
-        projectId: generateProjectId(),
-        imageUrl: result.imageUrl,
-        timestamp: new Date(),
-        description: fullPrompt || undefined,
-        resolution: resolution,
-        garmentType: primaryGarment.label,
-        generationTimeMs,
-      };
-
-      setResults(prev => [newResult, ...prev]);
-      
-      // ローカル履歴に保存
-      addToHistory({
-        id: newResult.id,
-        imageUrl: newResult.imageUrl || '',
-        timestamp: newResult.timestamp.toISOString(),
-        description: newResult.description || '',
-        resolution: newResult.resolution || '',
-        format: imageFormat,
-        garmentLabels: uploadedGarments.map(g => g.label),
-        generationTimeMs,
-      });
-
-      // Supabaseに履歴を保存
-      const deviceId = getDeviceId();
-      supabase.from('generations').insert({
-        device_id: deviceId,
-        project_id: newResult.projectId,
-        image_url: newResult.imageUrl,
-        garment_types: uploadedGarments.map(g => g.id),
-        generation_time_ms: generationTimeMs,
-        description: newResult.description || '',
-        resolution: newResult.resolution,
-        format: imageFormat,
-      }).then(({ error }) => {
-        if (error) console.error('Failed to save to Supabase:', error);
-      });
-
-      setUsageStats(prev => ({ ...prev, generations: prev.generations + 1 }));
-      setTryOnModalOpen(false);
-    } catch (e: any) {
-      console.error('[Generate] Error:', e);
-      setTryOnModalOpen(false);  // エラー時もモーダルを閉じてエラーを見えるようにする
-      setError(`生成エラー: ${e.message}`);
-    } finally {
-      setIsGenerating(false);
-    }
-  }, [humanFile, uploadedGarments, resolution, imageFormat, selectedPose]);
 
   // ローディング中
   if (loading) {
@@ -503,6 +476,10 @@ const App: React.FC = () => {
     );
   }
 
+  // --- Auth Check ---
+  if (!user) {
+    return <AuthForm />;
+  }
 
   return (
     <div className="min-h-screen bg-[#FAFAFA] dark:bg-[#0a0a0f] text-[#333333] dark:text-white transition-colors duration-300">
@@ -516,17 +493,187 @@ const App: React.FC = () => {
       <header className="glass sticky top-0 z-40 border-b border-[#E0E0E0]">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-[#00BFA5] to-[#78909C] flex items-center justify-center text-xl font-black shadow-lg shadow-teal-500/20">
-              着
+            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-xl font-black shadow-lg shadow-purple-500/20 text-white">
+              動
             </div>
             <div>
               <h1 className="text-lg font-extrabold text-[#333333] tracking-tight">
-                着てみるAI
+                ショート動画 AI
               </h1>
-              <p className="text-[10px] text-[#78909C] -mt-0.5 tracking-widest font-medium">スタジオは、もういらない。</p>
-              </div>
+              <p className="text-[10px] text-[#78909C] -mt-0.5 tracking-widest font-medium">７カット自動生成スタジオ</p>
             </div>
-            <div className="flex items-center gap-3">
+          </div>
+          <div className="flex items-center gap-3">
+
+            {/* Character Settings Button */}
+              <div className="relative" ref={charPanelRef}>
+                <button
+                  onClick={() => setCharPanelOpen(!charPanelOpen)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-semibold transition-all shadow-sm ${
+                    charPanelOpen
+                      ? 'bg-purple-500/10 dark:bg-purple-500/20 border-purple-500/30 text-purple-600 dark:text-purple-300'
+                      : 'bg-[#FAFAFA] dark:bg-[#1a1a24] border-[#E0E0E0] dark:border-white/10 text-[#78909C] hover:text-[#333333] dark:hover:text-white hover:bg-[#F5F5F5] dark:hover:bg-[#2a2a36]'
+                  }`}
+                >
+                  <UserCircle size={16} />
+                  <span className="hidden sm:inline">キャラクター</span>
+                  {/* Status dots */}
+                  <div className="flex gap-1">
+                    <div className={`w-2 h-2 rounded-full ${humanFile ? 'bg-cyan-400' : 'bg-gray-300 dark:bg-gray-600'}`} />
+                    <div className={`w-2 h-2 rounded-full ${subCharFile ? 'bg-purple-400' : 'bg-gray-300 dark:bg-gray-600'}`} />
+                  </div>
+                  <ChevronDown size={12} className={`transition-transform duration-200 ${charPanelOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                {/* Character Panel Dropdown */}
+                {charPanelOpen && (
+                  <div className="absolute right-0 top-full mt-2 w-[480px] bg-white dark:bg-[#16161e] border border-[#E0E0E0] dark:border-white/10 rounded-2xl shadow-2xl dark:shadow-purple-500/5 p-4 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div className="flex items-center gap-2 mb-4">
+                      <div className="w-1 h-4 rounded-full bg-gradient-to-b from-cyan-400 to-purple-500"></div>
+                      <h3 className="text-xs font-bold text-[#333] dark:text-gray-200 uppercase tracking-wider">キャラクター設定</h3>
+                    </div>
+                    
+                    <div className="flex flex-col gap-6">
+                      {/* Main Character Row */}
+                      <div className="flex gap-4 items-end border-b border-[#E0E0E0] dark:border-white/10 pb-4">
+                        <div className="w-[140px] shrink-0">
+                          <ImageUploader
+                            label="メインモデル"
+                            icon={<User size={16} />}
+                            previewUrl={humanPreview}
+                            onFileSelect={handleHumanSelect}
+                            onClear={() => { setHumanFile(null); setHumanPreview(null); }}
+                            accentColor="#00d4ff"
+                            hint="正面の全身画像"
+                            compact
+                          />
+                        </div>
+                        <div className="flex-1 space-y-2">
+                          <div>
+                            <label className="text-[10px] font-bold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">感情・基本挙動プロンプト</label>
+                            <textarea
+                              value={mainCharPrompt}
+                              onChange={(e) => setMainCharPrompt(e.target.value)}
+                              placeholder="感情、追加の容姿、服装などを入力..."
+                              rows={3}
+                              className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg px-2.5 py-2 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50 placeholder:text-gray-400 dark:placeholder:text-gray-600 resize-none"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Sub Character Row */}
+                      <div className="flex gap-4 items-end border-b border-[#E0E0E0] dark:border-white/10 pb-4">
+                        <div className="w-[140px] shrink-0">
+                          <ImageUploader
+                            label="IP"
+                            icon={<Users size={16} />}
+                            previewUrl={subCharPreview}
+                            onFileSelect={handleSubCharSelect}
+                            onClear={() => { setSubCharFile(null); setSubCharPreview(null); }}
+                            accentColor="#a855f7"
+                            hint="共演IP（任意）"
+                            compact
+                          />
+                        </div>
+                        <div className="flex-1 space-y-2">
+                          <div className={!subCharFile ? "opacity-50 pointer-events-none" : ""}>
+                            <label className="text-[10px] font-bold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">感情・IPプロンプト</label>
+
+                            {/* Preset tags */}
+                            <div className="flex flex-wrap gap-1 mb-2">
+                              {SUB_CHAR_PRESETS.map((tag) => (
+                                <button
+                                  key={tag.id}
+                                  onClick={() => setActiveSubTags(prev => {
+                                    const next = new Set(prev);
+                                    next.has(tag.id) ? next.delete(tag.id) : next.add(tag.id);
+                                    return next;
+                                  })}
+                                  className={`px-1.5 py-0.5 rounded text-[8px] font-bold border transition-all duration-150 ${
+                                    activeSubTags.has(tag.id)
+                                      ? 'bg-purple-500/15 border-purple-500/40 text-purple-500 dark:text-purple-300'
+                                      : 'bg-transparent border-gray-200 dark:border-white/10 text-gray-400 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-400'
+                                  }`}
+                                >
+                                  {tag.label}
+                                </button>
+                              ))}
+                            </div>
+                            <input
+                              type="text"
+                              value={customSubPrompt}
+                              onChange={(e) => setCustomSubPrompt(e.target.value)}
+                              placeholder="追加の指示を入力..."
+                              className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg px-2.5 py-1.5 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50 placeholder:text-gray-400 dark:placeholder:text-gray-600"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Per-Cut Character Assignment */}
+                      <div>
+                        <h4 className="text-[10px] font-bold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-2">カットごとの登場設定</h4>
+                        <div className="space-y-1 max-h-[160px] overflow-y-auto custom-scrollbar pr-1 grid grid-cols-2 gap-x-4">
+                          {cuts.map((cut) => (
+                            <div key={cut.id} className={`flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all ${
+                              cut.enabled ? 'bg-gray-50 dark:bg-white/[0.03]' : 'opacity-30'
+                            }`}>
+                              <span className="text-[10px] font-bold text-[#78909C] dark:text-gray-500 w-4 text-center">{cut.id}</span>
+                              <button
+                                onClick={() => setCuts(prev => prev.map(c => c.id === cut.id ? { ...c, showMain: !c.showMain } : c))}
+                                className={`flex-1 py-0.5 rounded text-[8px] font-bold border transition-all ${
+                                  cut.showMain
+                                    ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-500 dark:text-cyan-400'
+                                    : 'bg-transparent border-gray-200 dark:border-white/10 text-gray-300 dark:text-gray-600'
+                                }`}
+                              >
+                                メイン
+                              </button>
+                              <button
+                                onClick={() => setCuts(prev => prev.map(c => c.id === cut.id ? { ...c, showSub: !c.showSub } : c))}
+                                disabled={!subCharFile}
+                                className={`flex-1 py-0.5 rounded text-[8px] font-bold border transition-all ${
+                                  !subCharFile
+                                    ? 'bg-transparent border-gray-100 dark:border-white/5 text-gray-200 dark:text-gray-700 cursor-not-allowed'
+                                    : cut.showSub
+                                    ? 'bg-purple-500/10 border-purple-500/30 text-purple-500 dark:text-purple-400'
+                                    : 'bg-transparent border-gray-200 dark:border-white/10 text-gray-300 dark:text-gray-600'
+                                }`}
+                              >
+                                IP
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <p className="text-[9px] text-[#78909C] mt-4 text-center">メインモデルは必須 / IPは任意</p>
+
+                    {/* 設定完了ボタン */}
+                    <button
+                      onClick={() => {
+                        if (!humanFile) {
+                          alert('メインモデルの画像を設定してください');
+                          return;
+                        }
+                        setCharacterConfirmed(true);
+                        setCharPanelOpen(false);
+                      }}
+                      disabled={!humanFile}
+                      className={`w-full mt-4 py-3 rounded-xl font-bold text-sm transition-all ${
+                        humanFile
+                          ? 'bg-gradient-to-r from-cyan-500 to-purple-500 text-white shadow-lg hover:shadow-cyan-500/30'
+                          : 'bg-gray-200 dark:bg-white/10 text-gray-400 cursor-not-allowed'
+                      }`}
+                    >
+                      設定完了
+                    </button>
+                  </div>
+                )}
+              </div>
+
               {/* Theme Toggle Button */}
               <button
                 onClick={toggleTheme}
@@ -535,29 +682,14 @@ const App: React.FC = () => {
                 {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
               </button>
 
-              {/* History Button */}
-            <button
-              onClick={() => navigate('/history')}
-              className="flex items-center gap-2 text-[11px] px-4 py-2 rounded-lg bg-[#F5F5F5] text-[#78909C] border border-[#E0E0E0] hover:text-[#00ff88] hover:border-[#00ff88]/30 hover:bg-[#00ff88]/5 transition-all duration-300"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span className="hidden sm:inline">履歴</span>
-              {results.length > 0 && (
-                <span className="bg-[#00BFA5] text-white text-[9px] px-1.5 py-0.5 rounded-full font-bold">
-                  {results.length}
-                </span>
-              )}
-            </button>
             {user && (
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-4 pl-4 border-l border-[#E0E0E0] md:ml-2">
                 <span className="text-[11px] text-[#78909C]">
                   {user.email?.split('@')[0]}
                 </span>
                 <button
                   onClick={() => signOut()}
-                  className="text-[11px] px-4 py-2 rounded-lg bg-[#F5F5F5] text-[#78909C] border border-[#E0E0E0] hover:text-red-400 hover:border-red-400/30 hover:bg-red-400/5 transition-all duration-300"
+                  className="text-[11px] px-3 py-1.5 rounded-lg bg-[#F5F5F5] text-[#78909C] border border-[#E0E0E0] hover:text-red-400 hover:border-red-400/30 hover:bg-red-400/5 transition-all duration-300"
                 >
                   ログアウト
                 </button>
@@ -569,7 +701,7 @@ const App: React.FC = () => {
 
       {/* Main Content with Sidebar */}
       <div className="flex relative z-10">
-        {/* Left Sidebar - How to Use */}
+        {/* Left Sidebar - Settings & Info */}
         <aside className="hidden xl:block w-64 flex-shrink-0 border-r border-[#E0E0E0] min-h-[calc(100vh-73px)] sticky top-[73px] self-start">
           <div className="p-6 space-y-6">
             {/* How to Use */}
@@ -610,11 +742,7 @@ const App: React.FC = () => {
                 </div>
                 <div className="flex items-center gap-2 text-[11px] text-[#78909C]">
                   <span className="text-[#00BFA5]">✓</span>
-                  <span>AIによる着こなし提案</span>
-                </div>
-                <div className="flex items-center gap-2 text-[11px] text-[#78909C]">
-                  <span className="text-[#00BFA5]">✓</span>
-                  <span>複数アイテム対応</span>
+                  <span>服のデザイン完全再現</span>
                 </div>
                 <div className="flex items-center gap-2 text-[11px] text-[#78909C]">
                   <span className="text-[#00BFA5]">✓</span>
@@ -634,6 +762,7 @@ const App: React.FC = () => {
               </div>
             </div>
 
+
             {/* Tech Stack */}
 
           </div>
@@ -641,580 +770,773 @@ const App: React.FC = () => {
 
         {/* Main Content Area */}
         <main className="flex-1 max-w-6xl mx-auto px-6 py-10">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-            {/* Center Panel: Inputs */}
-            <div className="lg:col-span-5 space-y-6">
-              {/* Settings: Resolution & Format */}
-              <div className="glass rounded-2xl p-4">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-1 h-5 rounded-full bg-gradient-to-b from-[#fbbf24] to-[#ff6b35]"></div>
-                  <h2 className="text-[#333333] font-semibold text-sm">出力設定</h2>
-                </div>
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <label className="text-[10px] font-medium text-[#78909C] mb-1.5 block uppercase tracking-wider">解像度</label>
-                    <select
-                      value={resolution}
-                      onChange={(e) => setResolution(e.target.value as Resolution)}
-                      className="w-full bg-[#FAFAFA] border border-[#E0E0E0] rounded-lg px-3 py-2.5 text-xs text-[#333333] focus:outline-none focus:border-[#00BFA5]/50 transition-all duration-300 cursor-pointer appearance-none"
-                      style={{
-                        backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2378909C'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
-                        backgroundRepeat: 'no-repeat',
-                        backgroundPosition: 'right 8px center',
-                        backgroundSize: '14px',
-                      }}
-                    >
-                      <option value="1K">1K</option>
-                      <option value="2K">2K</option>
-                      <option value="4K">4K</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-medium text-[#78909C] mb-1.5 block uppercase tracking-wider">形式</label>
-                    <select
-                      value={imageFormat}
-                      onChange={(e) => setImageFormat(e.target.value as ImageFormat)}
-                      className="w-full bg-[#FAFAFA] border border-[#E0E0E0] rounded-lg px-3 py-2.5 text-xs text-[#333333] focus:outline-none focus:border-[#fbbf24]/50 transition-all duration-300 cursor-pointer appearance-none"
-                      style={{
-                        backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23666'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
-                        backgroundRepeat: 'no-repeat',
-                        backgroundPosition: 'right 8px center',
-                        backgroundSize: '14px',
-                      }}
-                    >
-                      <option value="png">PNG</option>
-                      <option value="jpeg">JPEG</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-medium text-[#78909C] mb-1.5 block uppercase tracking-wider">分析AI</label>
-                    <select
-                      value={analysisAI}
-                      onChange={(e) => setAnalysisAI(e.target.value as AIProvider)}
-                      className="w-full bg-[#FAFAFA] border border-[#E0E0E0] rounded-lg px-3 py-2.5 text-xs text-[#333333] focus:outline-none focus:border-[#00BFA5]/50 transition-all duration-300 cursor-pointer appearance-none"
-                      style={{
-                        backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2378909C'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
-                        backgroundRepeat: 'no-repeat',
-                        backgroundPosition: 'right 8px center',
-                        backgroundSize: '14px',
-                      }}
-                    >
-                      <option value="gemini">Gemini</option>
-                      <option value="chatgpt">ChatGPT</option>
-                    </select>
-                  </div>
-                </div>
-                {/* Cost Display */}
-                {(usageStats.generations > 0 || usageStats.analyses > 0 || usageStats.chatgptCalls > 0) && (
-                  <div className="mt-3 pt-3 border-t border-[#E0E0E0]">
-                    <div className="flex items-center justify-between text-[10px]">
-                      <span className="text-[#78909C]">今回の概算費用</span>
-                      <span className="text-[#fbbf24] font-semibold">${cost.total.toFixed(4)}</span>
-                    </div>
-                    <div className="flex gap-2 mt-1.5 text-[9px] text-[#78909C]">
-                      <span>生成:{usageStats.generations}</span>
-                      <span>分析:{usageStats.analyses}</span>
-                      <span>GPT:{usageStats.chatgptCalls}</span>
-                    </div>
-                  </div>
-                )}
-              </div>
+          <div className="flex justify-center">
+            {/* Split Panel: Inputs */}
+            <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-12 gap-6 items-start mx-auto">
+              
+              {/* Left Column: Composition and Generation Flow */}
+              <div className="lg:col-span-7 xl:col-span-8 flex flex-col gap-6">
 
-            {/* Front/Back Toggle */}
-            <div className="glass rounded-2xl p-1.5">
-              <div className="flex gap-1.5">
-                <button
-                  onClick={() => setViewSide('front')}
-                  className={`flex-1 py-3.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all duration-300 ${
-                    viewSide === 'front'
-                      ? 'bg-gradient-to-r from-[#00d4ff] to-[#00ff88] text-[#333333] shadow-lg shadow-teal-200/20'
-                      : 'text-[#78909C] hover:text-[#999] hover:bg-[#F5F5F5]'
-                  }`}
-                >
-                  <span className="text-lg">🧑</span> 正面
-                </button>
-                <button
-                  onClick={() => setViewSide('back')}
-                  className={`flex-1 py-3.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all duration-300 ${
-                    viewSide === 'back'
-                      ? 'bg-gradient-to-r from-[#00ff88] to-[#00d4ff] text-[#333333] shadow-lg shadow-green-500/20'
-                      : 'text-[#78909C] hover:text-[#999] hover:bg-[#F5F5F5]'
-                  }`}
-                >
-                  <span className="text-lg">🔙</span> 背面
-                </button>
-              </div>
-            </div>
-
-            {/* Model Upload */}
-            <div className="glass rounded-2xl p-6 card-hover">
-              <div className="flex items-center gap-3 mb-5">
-                <div className="w-1 h-6 rounded-full bg-gradient-to-b from-[#00d4ff] to-[#00ff88]"></div>
-                <h2 className="text-[#333333] font-semibold text-sm">モデル画像</h2>
-                <span className={`text-[9px] px-2.5 py-1 rounded-full font-medium ${
-                  viewSide === 'front'
-                    ? 'bg-[#00d4ff]/10 text-[#00d4ff] border border-[#00d4ff]/20'
-                    : 'bg-[#00ff88]/10 text-[#00ff88] border border-[#00ff88]/20'
-                }`}>
-                  {viewSide === 'front' ? '正面' : '背面'}
-                </span>
-              </div>
-              <ImageUploader
-                label={viewSide === 'front' ? 'モデル正面' : 'モデル背面'}
-                icon={viewSide === 'front' ? <User size={24} /> : <FlipHorizontal size={24} />}
-                previewUrl={viewSide === 'front' ? humanPreview : humanBackPreview}
-                onFileSelect={viewSide === 'front' ? handleHumanSelect : handleHumanBackSelect}
-                onClear={viewSide === 'front'
-                  ? () => { setHumanFile(null); setHumanPreview(null); }
-                  : () => { setHumanBackFile(null); setHumanBackPreview(null); }
-                }
-                accentColor={viewSide === 'front' ? '#00d4ff' : '#00ff88'}
-                hint={viewSide === 'front' ? '正面の全身画像' : '背面の全身画像（任意）'}
+              {/* Story PDF → Auto Cut Composition */}
+              <StoryPdfUploader
+                aiModel={aiModel}
+                onAiModelChange={(model) => {
+                  setAiModel(model);
+                  localStorage.setItem('snafty_ai_model', model);
+                }}
+                onStoryExtracted={(text) => setExtractedPdfText(text)}
+                onCutsGenerated={(newCuts) => {
+                  setCuts(newCuts);
+                  setEditingCutId(null);
+                }}
+                characterFile={humanFile}
+                characterConfirmed={characterConfirmed}
+                onRequestCharacter={() => {
+                  // キャラクター設定パネルを開く
+                  setCharPanelOpen(true);
+                }}
+                onFullAutoGenerate={handleFullAutoGenerate}
               />
-              {/* Pose Selection Panel */}
-              <div className="mt-4 pt-4 border-t border-[#E0E0E0]">
-                <div className="flex items-center justify-between mb-3 text-sm">
-                  <span className="font-bold text-[#333333]">ポーズ指定</span>
+
+            {/* Composition Plan Settings */}
+            <div className="glass rounded-2xl p-4">
+              <div className="flex items-center justify-between mb-4">
+                {/* Title on the Left */}
+                <div className="flex items-center gap-3">
+                  <div className="w-1 h-5 rounded-full bg-gradient-to-b from-cyan-400 to-purple-500"></div>
+                  <h2 className="text-[#333333] dark:text-gray-200 font-semibold text-sm">構成表設定（{enabledCuts.length}カット）</h2>
                 </div>
-                <div>
-                  <select
-                    value={selectedPose}
-                    onChange={(e) => setSelectedPose(e.target.value)}
-                    className="w-full bg-white border border-[#E0E0E0] rounded-xl px-4 py-2.5 text-sm text-[#333333] focus:outline-none focus:border-[#00BFA5] transition-colors"
-                  >
-                    <option value="">🚫 指定なし</option>
-                    <option value="standing front-facing">🧍 立ち（正面）</option>
-                    <option value="standing with hands on hips">💪 腰に手</option>
-                    <option value="walking naturally">🚶 歩行</option>
-                    <option value="sitting on a chair">🪑 座り</option>
-                    <option value="leaning against a wall casually">😎 壁寄りかかり</option>
-                    <option value="arms crossed confidently">🤝 腕組み</option>
-                    <option value="looking over shoulder">👀 振り返り</option>
-                    <option value="standing with one hand in pocket">🫴 ポケットに手</option>
-                    {selectedPose && ![
-                      '', 'standing front-facing', 'standing with hands on hips', 
-                      'walking naturally', 'sitting on a chair', 'leaning against a wall casually', 
-                      'arms crossed confidently', 'looking over shoulder', 'standing with one hand in pocket'
-                    ].includes(selectedPose) && (
-                      <option value={selectedPose}>✨ AI分析: {selectedPose}</option>
-                    )}
-                  </select>
-                </div>
-                
-                <div className="mt-3 relative">
-                  <input 
-                    type="file"
-                    ref={poseInputRef}
-                    className="hidden"
-                    accept="image/*"
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      setIsAnalyzingPose(true);
-                      try {
-                        const dataUrl = await fileToDataUrl(file);
-                        const result = await analyzePose(dataUrl);
-                        setPoseQuestionResult(result);
-                      } catch (err) {
-                        console.error('Pose analysis error:', err);
-                      } finally {
-                        setIsAnalyzingPose(false);
-                        e.target.value = ''; // reset
-                      }
-                    }}
-                  />
+
+                {/* Toolbar on the Right */}
+                <div className="flex items-center gap-3">
                   <button
-                    onClick={() => poseInputRef.current?.click()}
-                    disabled={isAnalyzingPose}
-                    className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-xs font-medium bg-white text-[#78909C] border border-[#E0E0E0] hover:border-[#00BFA5]/50 hover:bg-[#00BFA5]/10 transition-all duration-200 disabled:opacity-50"
+                    onClick={() => setStoryboardModalOpen(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all shadow-sm bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-violet-500/20 hover:shadow-violet-500/40 hover:scale-105"
                   >
-                    {isAnalyzingPose ? (
-                      <>
-                        <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        分析中...
-                      </>
-                    ) : (
-                      <>📸 別の画像からポーズ分析</>
-                    )}
+                    <BookOpen size={10} />
+                    PDF自動生成
                   </button>
-                  <p className="text-[9px] text-[#78909C] mt-2 text-center">
-                    💡 画像をアップロードしてAIにポーズを自動判断させます
-                  </p>
-                </div>
-              </div>
-            </div>
+                  <button
+                    onClick={() => setVideoModalOpen(true)}
+                    disabled={isGenerating || !humanFile}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all shadow-sm ${
+                      isGenerating || !humanFile
+                        ? 'bg-gray-100 dark:bg-white/5 text-[#9E9E9E] dark:text-gray-500 cursor-not-allowed border outline-none'
+                        : 'bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-purple-500/20 hover:shadow-purple-500/40 hover:scale-105'
+                    }`}
+                  >
+                    <Play size={10} />
+                    一括動画生成
+                  </button>
 
-            {/* Garment Uploads */}
-            <div className="glass rounded-2xl p-6 card-hover">
-              <div className="flex items-center gap-3 mb-5">
-                <div className="w-1 h-6 rounded-full bg-gradient-to-b from-[#00BFA5] to-[#fbbf24]"></div>
-                <h2 className="text-[#333333] font-semibold text-sm">アイテム</h2>
-                <span className={`text-[9px] px-2.5 py-1 rounded-full font-medium ${
-                  viewSide === 'front'
-                    ? 'bg-[#00d4ff]/10 text-[#00d4ff] border border-[#00d4ff]/20'
-                    : 'bg-[#00ff88]/10 text-[#00ff88] border border-[#00ff88]/20'
-                }`}>
-                  {viewSide === 'front' ? '正面' : '背面'}
-                </span>
-                {uploadedGarments.length > 0 && (
-                  <span className="text-[9px] bg-[#00BFA5]/10 text-[#00BFA5] px-2.5 py-1 rounded-full font-medium border border-[#00BFA5]/20">
-                    {uploadedGarments.length}点
-                  </span>
-                )}
-              </div>
-
-              {/* Garment Selector */}
-              <div className="mb-4">
-                <label className="text-[10px] font-medium text-[#78909C] mb-1.5 block uppercase tracking-wider">アイテムの種類</label>
-                <select
-                  value={activeGarmentId}
-                  onChange={(e) => setActiveGarmentId(e.target.value)}
-                  className="w-full bg-[#FAFAFA] border border-[#E0E0E0] rounded-lg px-3 py-2.5 text-sm text-[#333333] focus:outline-none focus:border-[#00BFA5]/50 transition-all duration-300 cursor-pointer appearance-none font-medium"
-                  style={{
-                    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2378909C'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
-                    backgroundRepeat: 'no-repeat',
-                    backgroundPosition: 'right 12px center',
-                    backgroundSize: '16px',
-                  }}
-                >
-                  <optgroup label="上半身">
-                    <option value="top">👕 トップス</option>
-                    <option value="inner">🎽 インナー</option>
-                    <option value="outer">🧥 アウター</option>
-                  </optgroup>
-                  <optgroup label="下半身・足元">
-                    <option value="bottom">👖 ボトムス</option>
-                    <option value="shoes">👟 シューズ</option>
-                  </optgroup>
-                  <optgroup label="全身">
-                    <option value="dress">👗 ワンピース/セットアップ</option>
-                  </optgroup>
-                  <optgroup label="その他">
-                    <option value="accessory">⌚ アクセサリー</option>
-                  </optgroup>
-                </select>
-              </div>
-
-              {/* Uploaded Garments Status */}
-              {uploadedGarments.length > 0 && (
-                <div className="flex flex-wrap gap-2 mb-4">
-                  {garments.filter(g => g.preview || g.backPreview).map(g => (
+                  <div className="relative" ref={semanticPanelRef}>
                     <button
-                      key={`badge-${g.id}`}
-                      onClick={() => setActiveGarmentId(g.id)}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
-                        activeGarmentId === g.id
-                          ? 'border-[#00BFA5] bg-[#00BFA5]/10 text-[#333333]'
-                          : 'border-[#E0E0E0] bg-white text-[#78909C] hover:bg-[#F5F5F5]'
+                      onClick={() => setSemanticPanelOpen(!semanticPanelOpen)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[10px] font-bold transition-all shadow-sm ${
+                        semanticPanelOpen
+                          ? 'bg-blue-500/10 dark:bg-blue-500/20 border-blue-500/30 text-blue-600 dark:text-blue-300'
+                          : 'bg-white dark:bg-white/5 border-[#E0E0E0] dark:border-white/10 text-[#78909C] hover:text-[#333] dark:hover:text-white hover:bg-gray-50 dark:hover:bg-white/10'
                       }`}
                     >
-                      <span>{g.icon}</span>
-                      <span>{g.label}</span>
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#00BFA5] ml-1"></span>
+                      意味構造
+                      <ChevronDown size={10} className={`transition-transform duration-200 ${semanticPanelOpen ? 'rotate-180' : ''}`} />
                     </button>
-                  ))}
-                </div>
-              )}
+                    {semanticPanelOpen && (
+                      <div className="absolute top-full right-0 mt-3 w-[400px] bg-white dark:bg-[#16161e] border border-[#E0E0E0] dark:border-white/10 rounded-2xl shadow-2xl dark:shadow-blue-500/5 p-5 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                        <div className="flex items-center gap-3 mb-4">
+                          <div className="w-1 h-5 rounded-full bg-gradient-to-b from-blue-400 to-indigo-500"></div>
+                          <h3 className="text-[#333333] dark:text-gray-200 font-semibold text-sm">意味構造</h3>
+                        </div>
+                        <div className="space-y-2 text-left">
+                          <p className="text-[10px] text-[#78909C] dark:text-gray-500 font-medium whitespace-normal">ショート動画全体の意味構造（プロット展開）を一つにまとめて定義します。</p>
+                          <textarea
+                            value={semanticPrompt}
+                            onChange={(e) => setSemanticPrompt(e.target.value)}
+                            placeholder="全体の意味構造を入力..."
+                            className="w-full h-40 bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg p-2.5 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-blue-500/50 transition-colors custom-scrollbar resize-y whitespace-pre-wrap leading-relaxed"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="relative" ref={productPanelRef}>
+                    <button
+                      onClick={() => setProductPanelOpen(!productPanelOpen)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[10px] font-bold transition-all shadow-sm ${
+                        productPanelOpen
+                          ? 'bg-amber-500/10 dark:bg-amber-500/20 border-amber-500/30 text-amber-600 dark:text-amber-300'
+                          : 'bg-white dark:bg-white/5 border-[#E0E0E0] dark:border-white/10 text-[#78909C] hover:text-[#333] dark:hover:text-white hover:bg-gray-50 dark:hover:bg-white/10'
+                      }`}
+                    >
+                      プロダクト強調
+                      <ChevronDown size={10} className={`transition-transform duration-200 ${productPanelOpen ? 'rotate-180' : ''}`} />
+                    </button>
+                    {productPanelOpen && (
+                      <div className="absolute top-full right-0 mt-3 w-[400px] bg-white dark:bg-[#16161e] border border-[#E0E0E0] dark:border-white/10 rounded-2xl shadow-2xl dark:shadow-amber-500/5 p-5 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                        <div className="flex items-center gap-3 mb-4">
+                          <div className="w-1 h-5 rounded-full bg-gradient-to-b from-amber-400 to-orange-500"></div>
+                          <h3 className="text-[#333333] dark:text-gray-200 font-semibold text-sm">プロダクト強調</h3>
+                        </div>
+                        <div className="space-y-2 text-left">
+                          <p className="text-[10px] text-[#78909C] dark:text-gray-500 font-medium whitespace-normal">衣装・商品へのフォーカスを強く高めるプロンプトを定義します。</p>
+                          <textarea
+                            value={productPrompt}
+                            onChange={(e) => setProductPrompt(e.target.value)}
+                            placeholder="例: extremely detailed garment texture, highly focused on the clothing item, clear product shot..."
+                            className="w-full h-32 bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg p-2.5 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-amber-500/50 transition-colors custom-scrollbar resize-y whitespace-pre-wrap leading-relaxed"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
 
-              {/* Active Garment Uploader */}
-              <div className="max-w-xs mx-auto">
-                {garments.filter(g => g.id === activeGarmentId).map(garment => (
-                  <div
-                    key={garment.id}
-                    className="transition-all duration-300 rounded-xl"
+                  <div className="w-px h-6 bg-gray-200 dark:bg-white/10 mx-1"></div>
+
+                  <button
+                    onClick={resetCuts}
+                    className="flex items-center gap-1 text-[10px] text-[#78909C] hover:text-[#333] dark:hover:text-gray-300 transition-colors whitespace-nowrap"
                   >
-                    <ImageUploader
-                      label={garment.label}
-                      icon={garment.icon}
-                      previewUrl={viewSide === 'front' ? garment.preview : garment.backPreview}
-                      onFileSelect={viewSide === 'front' ? handleGarmentSelect(garment.id) : handleGarmentBackSelect(garment.id)}
-                      onClear={viewSide === 'front' ? handleGarmentClear(garment.id) : handleGarmentBackClear(garment.id)}
-                      accentColor={garment.accentColor}
-                      hint={garment.hint}
-                    />
+                    <RotateCcw size={10} /> リセット
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                {cuts.map((cut, index) => (
+                  <div
+                    key={cut.id}
+                    className={`rounded-xl border transition-all duration-200 ${
+                      cut.enabled
+                        ? 'bg-white/50 dark:bg-white/[0.04] border-[#E0E0E0] dark:border-white/10 shadow-sm'
+                        : 'bg-white/20 dark:bg-white/[0.01] border-[#E0E0E0] dark:border-white/5 opacity-40'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 p-3">
+                      {/* Image Thumbnail & Status */}
+                      <div className="relative w-11 h-[78px] rounded-md shrink-0 border border-[#E0E0E0] dark:border-white/10 shadow-sm overflow-hidden group bg-[#F5F5F5] dark:bg-white/5 flex items-center justify-center">
+                        {cut.generatedImageUrl ? (
+                          <img src={cut.generatedImageUrl} alt="cut" className="w-full h-full object-cover" />
+                        ) : (
+                          <ImageIcon size={14} className="text-[#B0BEC5] dark:text-gray-500 opacity-50" />
+                        )}
+                        
+                        {cut.isGenerating && (
+                          <div className="absolute inset-0 bg-black/50 flex flex-col justify-center items-center">
+                            <Loader2 size={10} className="text-white animate-spin" />
+                          </div>
+                        )}
+
+                        {/* Overlay Controls */}
+                        {!cut.isGenerating && (
+                          <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <label className="text-white hover:text-cyan-400 p-1.5 rounded-full bg-white/10 hover:bg-white/20 cursor-pointer transition-colors" title="画像を差し替える (アップロード)">
+                              <Upload size={12} />
+                              <input type="file" accept="image/*" onChange={(e) => { if(e.target.files?.[0]) handleUploadCutImage(cut.id, e.target.files[0]); }} className="hidden" />
+                            </label>
+                            <button 
+                              onClick={() => generateImageForCut(cut.id)} 
+                              className="text-white hover:text-purple-400 p-1.5 rounded-full bg-white/10 hover:bg-white/20 transition-colors" 
+                              title="画像を再生成する (AI)"
+                              disabled={!humanFile}
+                            >
+                              <RotateCcw size={12} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Cut number */}
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${
+                        cut.enabled
+                          ? 'bg-purple-500/20 text-purple-600 dark:text-purple-400'
+                          : 'bg-gray-100 dark:bg-white/5 text-[#9E9E9E] dark:text-gray-600'
+                      }`}>
+                        {index + 1}
+                      </div>
+
+                      {/* Title + Prompt + character badges */}
+                      {editingCutId === cut.id ? (
+                        <input
+                          type="text"
+                          value={cut.title}
+                          onChange={(e) => updateCutField(cut.id, 'title', e.target.value)}
+                          className="flex-1 bg-white dark:bg-white/10 border border-[#E0E0E0] dark:border-white/20 rounded-lg px-2 py-1 text-xs text-[#333] dark:text-white focus:outline-none focus:border-purple-500/50"
+                          autoFocus
+                        />
+                      ) : (
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-medium text-[#333] dark:text-gray-300 truncate">
+                              {cut.title}
+                            </span>
+                            {/* Character badges */}
+                            <div className="flex gap-0.5 flex-shrink-0">
+                              {cut.showMain && (
+                                <span className="text-[8px] px-1 py-0.5 rounded bg-cyan-500/15 text-cyan-500 dark:text-cyan-400 font-bold">主</span>
+                              )}
+                              {cut.showSub && subCharFile && (
+                                <span className="text-[8px] px-1 py-0.5 rounded bg-purple-500/15 text-purple-500 dark:text-purple-400 font-bold">IP</span>
+                              )}
+                            </div>
+                          </div>
+                          {/* Prompt preview */}
+                          {cut.prompt && (
+                            <p className="text-[9px] text-[#78909C] dark:text-gray-500 mt-0.5 line-clamp-2 leading-relaxed">
+                              {cut.camera && <span className="text-blue-500 dark:text-blue-400 font-medium">[{cut.camera}] </span>}
+                              {cut.prompt}
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Action buttons */}
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <button
+                          onClick={() => setEditingCutId(editingCutId === cut.id ? null : cut.id)}
+                          className={`p-1 rounded transition-colors flex items-center justify-center relative ${
+                            editingCutId === cut.id
+                              ? 'bg-purple-500/20 text-purple-600 dark:text-purple-400'
+                              : 'hover:bg-gray-100 dark:hover:bg-white/10 text-[#78909C] dark:text-gray-500 hover:text-[#333] dark:hover:text-white'
+                          }`}
+                        >
+                          <Pencil size={12} />
+                          {cut.generatedImageUrl && !cut.isGenerating && (
+                            <div className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-green-500 animate-pulse border border-white dark:border-black" />
+                          )}
+                        </button>
+                        <button
+                          onClick={() => toggleCut(cut.id)}
+                          className={`w-8 h-5 rounded-full transition-all duration-200 flex items-center ${
+                            cut.enabled
+                              ? 'bg-purple-500 justify-end'
+                              : 'bg-gray-200 dark:bg-white/10 justify-start'
+                          }`}
+                        >
+                          <div className={`w-3.5 h-3.5 rounded-full mx-0.5 transition-all ${
+                            cut.enabled ? 'bg-white' : 'bg-[#9E9E9E] dark:bg-gray-500'
+                          }`} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Expanded edit area */}
+                    {editingCutId === cut.id && (
+                      <div className="px-3 pb-3 pt-0 space-y-3">
+                        <div>
+                          <label className="text-[9px] text-[#78909C] dark:text-gray-500 uppercase tracking-wider mb-1.5 block">キャラクター登場</label>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => setCuts(prev => prev.map(c => c.id === cut.id ? { ...c, showMain: !c.showMain } : c))}
+                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold border transition-all duration-200 ${
+                                cut.showMain
+                                  ? 'bg-cyan-500/10 dark:bg-cyan-500/15 border-cyan-500/30 dark:border-cyan-500/40 text-cyan-600 dark:text-cyan-300'
+                                  : 'bg-transparent dark:bg-white/[0.02] border-[#E0E0E0] dark:border-white/10 text-[#78909C] dark:text-gray-600 hover:text-[#333] dark:hover:text-gray-400'
+                              }`}
+                            >
+                              <span>👤</span> メイン
+                            </button>
+                            <button
+                              onClick={() => setCuts(prev => prev.map(c => c.id === cut.id ? { ...c, showSub: !c.showSub } : c))}
+                              disabled={!subCharFile}
+                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold border transition-all duration-200 ${
+                                !subCharFile
+                                  ? 'bg-gray-50 dark:bg-white/[0.01] border-[#E0E0E0] dark:border-white/5 text-[#9E9E9E] dark:text-gray-700 cursor-not-allowed'
+                                  : cut.showSub
+                                  ? 'bg-purple-500/10 dark:bg-purple-500/15 border-purple-500/30 dark:border-purple-500/40 text-purple-600 dark:text-purple-300'
+                                  : 'bg-transparent dark:bg-white/[0.02] border-[#E0E0E0] dark:border-white/10 text-[#78909C] dark:text-gray-600 hover:text-[#333] dark:hover:text-gray-400'
+                              }`}
+                            >
+                              <span>👥</span> IP{!subCharFile && <span className="text-[8px] ml-1 opacity-50">(未設定)</span>}
+                            </button>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-[9px] text-[#78909C] dark:text-gray-500 uppercase tracking-wider mb-1.5 block">カメラ距離・アングル</label>
+                          <div className="flex gap-2 flex-wrap mb-2">
+                            {(['クローズアップ', 'バストショット', 'ミディアム', 'ミドルロング', '全身'] as const).map(cam => (
+                              <button
+                                key={cam}
+                                onClick={() => updateCutField(cut.id, 'camera', cam)}
+                                className={`px-2 py-1 rounded-md text-[10px] font-bold border transition-colors ${
+                                  cut.camera === cam
+                                    ? 'bg-blue-500/20 border-blue-500/50 text-blue-600 dark:text-blue-400'
+                                    : 'bg-white/50 dark:bg-white/5 border-[#E0E0E0] dark:border-white/10 text-[#78909C] hover:text-[#333] dark:hover:text-white'
+                                }`}
+                              >
+                                {cam}
+                              </button>
+                            ))}
+                          </div>
+                          <input
+                            type="text"
+                            value={cut.camera || ''}
+                            onChange={(e) => updateCutField(cut.id, 'camera', e.target.value)}
+                            placeholder="その他の距離感・アングルを自由記述"
+                            className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded-lg px-3 py-1.5 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[9px] text-[#78909C] dark:text-gray-500 uppercase tracking-wider mb-1.5 mt-3 block">プロンプト詳細</label>
+                          <textarea
+                            value={cut.prompt}
+                            onChange={(e) => updateCutField(cut.id, 'prompt', e.target.value)}
+                            className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded-lg px-3 py-2 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50 resize-y min-h-[60px]"
+                          />
+                        </div>
+                        
+                        {/* Image Generation Section inside Edit */}
+                        <div className="pt-2 border-t border-[#E0E0E0] dark:border-white/10 mt-2">
+                          <button
+                            onClick={() => generateImageForCut(cut.id)}
+                            disabled={cut.isGenerating || (!humanFile)}
+                            className={`w-full py-2.5 rounded-lg font-bold text-xs flex justify-center items-center gap-2 transition-all duration-300 ${
+                              cut.isGenerating || (!humanFile)
+                                ? 'bg-gray-200 dark:bg-white/5 text-[#9E9E9E] dark:text-gray-500 cursor-not-allowed'
+                                : 'bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-md shadow-purple-500/20 hover:shadow-purple-500/40'
+                            }`}
+                          >
+                            {cut.isGenerating ? (
+                              <><Loader2 size={12} className="animate-spin" /> 画像生成中...</>
+                            ) : (
+                              <><ImageIcon size={12} /> {cut.generatedImageUrl ? '画像を再生成する' : 'このカットの画像を生成する'}</>
+                            )}
+                          </button>
+                          
+                          {cut.errorMessage && (
+                            <div className="text-red-500 dark:text-red-400 text-[10px] mt-2 bg-red-50 dark:bg-red-500/10 p-2 rounded text-center">
+                              {cut.errorMessage}
+                            </div>
+                          )}
+
+                          {cut.generatedImageUrl && (
+                            <div className="mt-3 relative h-40 bg-black/5 dark:bg-black/20 rounded-lg overflow-hidden border border-[#E0E0E0] dark:border-white/10 flex justify-center items-center p-2">
+                              <img 
+                                src={cut.generatedImageUrl} 
+                                alt={`Generated for ${cut.title}`} 
+                                className="h-full w-auto object-contain rounded drop-shadow-md" 
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* Generate Button */}
-            <div className="glass rounded-2xl p-4">
-              <button
-                onClick={handleOpenTryOnModal}
-                disabled={isGenerating || !humanFile || uploadedGarments.length === 0}
-                className={`w-full py-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2.5 transition-all duration-300 ${
-                  isGenerating || !humanFile || uploadedGarments.length === 0
-                    ? 'bg-[#F5F5F5] text-[#444] cursor-not-allowed border border-[#E0E0E0]'
-                    : 'bg-gradient-to-r from-[#00BFA5] via-[#78909C] to-[#00BFA5] text-[#333333] shadow-xl shadow-teal-500/25 hover:shadow-teal-500/40 hover:scale-[1.02] animate-gradient'
-                }`}
-              >
-                {isGenerating ? (
-                  <>
-                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                    着画を生成中...
-                  </>
-                ) : (
-                  <>✨ 着画を生成 ({uploadedGarments.length}アイテム)</>
-                )}
-              </button>
+            {/* Video Generation Settings */}
+            <div className="glass rounded-2xl p-4 mt-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-1 h-5 rounded-full bg-gradient-to-b from-blue-400 to-indigo-500"></div>
+                  <h2 className="text-[#333333] dark:text-gray-200 font-semibold text-sm">動画生成設定</h2>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setVideoMetaPanelOpen(!videoMetaPanelOpen)}
+                    className={`text-[10px] sm:text-xs font-bold transition-colors flex items-center gap-1 ${
+                      videoMetaPanelOpen ? 'text-gray-600 dark:text-gray-300' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'
+                    }`}
+                  >
+                    プロンプト指示設定
+                    <ChevronDown size={12} className={`transition-transform duration-200 ${videoMetaPanelOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  <button
+                    onClick={() => setVideoPromptPanelOpen(!videoPromptPanelOpen)}
+                    className="text-[10px] sm:text-xs text-indigo-600 dark:text-indigo-400 font-bold hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors flex items-center gap-1"
+                  >
+                    設定を開く
+                    <ChevronDown size={12} className={`transition-transform duration-200 ${videoPromptPanelOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                </div>
+              </div>
 
-              {/* Error */}
-              {error && (
-                <div className="mt-4 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs">
-                  {error}
+              {videoMetaPanelOpen && (
+                <div className="space-y-3 animate-in fade-in slide-in-from-top-2 duration-200 pt-3 border-t border-gray-200 dark:border-white/10 mt-2 mb-4 bg-gray-50 dark:bg-white/5 p-3 rounded-lg">
+                  <div>
+                    <label className="text-[10px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-2 block">
+                      [AI用] 動画生成プロンプト指示 (メタプロンプト)
+                    </label>
+                    <textarea
+                      value={videoMetaPrompt}
+                      onChange={(e) => setVideoMetaPrompt(e.target.value)}
+                      placeholder="AIに対する動画モーションの指示ルールなどを入力してください"
+                      className="w-full h-16 bg-white dark:bg-[#1a1a24] border border-gray-200 dark:border-white/10 rounded-lg p-2.5 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-gray-500/50 transition-colors custom-scrollbar resize-y"
+                    />
+                  </div>
+                  <div className="flex justify-end">
+                    <button
+                      onClick={() => {
+                        saveVideoMetaPrompt();
+                        setVideoMetaPanelOpen(false);
+                      }}
+                      className="px-3 py-1.5 bg-gray-200 hover:bg-gray-300 text-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700 dark:text-gray-200 text-[10px] font-bold rounded-lg transition-colors"
+                    >
+                      指示を保存して閉じる
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {videoPromptPanelOpen && (
+                <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-200 pt-3 border-t border-gray-200 dark:border-white/10 mt-2">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] items-center gap-1.5 flex font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider block">
+                      <span className="bg-indigo-400/20 text-indigo-600 dark:text-indigo-400 w-4 h-4 flex items-center justify-center rounded-full text-[9px]">1</span>
+                      使用モデル (ジェネレーター)
+                    </label>
+                    <select
+                      value={videoGenModel}
+                      onChange={(e) => setVideoGenModel(e.target.value)}
+                      className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg p-2.5 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-indigo-500/50 transition-colors"
+                    >
+                      <option value="luma">Luma Dream Machine</option>
+                      <option value="runway">Runway Gen-3 Alpha</option>
+                      <option value="haiper">Haiper AI</option>
+                      <option value="sora">OpenAI Sora</option>
+                      <option value="kling">Kling AI</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] items-center gap-1.5 flex font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-2">
+                      <span className="bg-blue-400/20 text-blue-600 dark:text-blue-400 w-4 h-4 flex items-center justify-center rounded-full text-[9px]">2</span>
+                      共通モーション・スタイル
+                    </label>
+                    <textarea
+                      value={videoPromptStyle}
+                      onChange={(e) => setVideoPromptStyle(e.target.value)}
+                      placeholder="例: smooth motion, high fps, cinematic pan... (全カットに共通して追加する動画の動きやスタイルのベース指定)"
+                      className="w-full h-16 bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg p-2.5 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-blue-500/50 transition-colors custom-scrollbar resize-y"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] items-center gap-1.5 flex font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-2">
+                      <span className="bg-cyan-400/20 text-cyan-600 dark:text-cyan-400 w-4 h-4 flex items-center justify-center rounded-full text-[9px]">3</span>
+                      ネガティブプロンプト
+                    </label>
+                    <textarea
+                      value={videoPromptNegative}
+                      onChange={(e) => setVideoPromptNegative(e.target.value)}
+                      placeholder="例: jerky movement, morphing, deformed... (生成してほしくない要素・状態)"
+                      className="w-full h-16 bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg p-2.5 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50 transition-colors custom-scrollbar resize-y"
+                    />
+                  </div>
+                  <div className="flex justify-end pt-2">
+                    <button
+                      onClick={() => {
+                        saveVideoPrompts();
+                        setVideoPromptPanelOpen(false);
+                      }}
+                      className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white text-[10px] font-bold rounded-lg transition-colors shadow-md shadow-indigo-500/20"
+                    >
+                      保存して閉じる
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
 
-          </div>
 
-          {/* Right Panel: Results */}
-          <div className="lg:col-span-7" data-results>
-            <div className="glass rounded-2xl p-6 min-h-[600px]">
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-3">
-                  <div className="w-1 h-6 rounded-full bg-gradient-to-b from-[#00ff88] to-[#00d4ff]"></div>
-                  <h2 className="text-[#333333] font-semibold text-sm">生成結果</h2>
-                  {results.length > 0 && (
-                    <span className="text-[9px] bg-[#00ff88]/10 text-[#00ff88] px-2.5 py-1 rounded-full font-medium border border-[#00ff88]/20">
-                      {results.length}
-                    </span>
+
+              </div>
+              
+              {/* Right Column: Character & Stage Settings */}
+              <div className="lg:col-span-5 xl:col-span-4 flex flex-col gap-6 sticky top-24">
+                {/* Character Status (compact) */}
+                <div className="glass rounded-2xl p-4 card-hover">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-1 h-5 rounded-full bg-gradient-to-b from-cyan-400 to-purple-500"></div>
+                      <h2 className="text-[#333333] dark:text-gray-200 font-semibold text-sm">キャラクター</h2>
+                    </div>
+                    <button
+                      onClick={() => setCharPanelOpen(true)}
+                      className="text-[10px] text-purple-500 dark:text-purple-400 font-semibold hover:underline"
+                    >
+                      設定を開く
+                    </button>
+                  </div>
+                  <div className="flex gap-3 mt-3">
+                    <div className={`flex items-center gap-2 flex-1 px-3 py-2 rounded-lg border text-xs ${
+                      humanFile
+                        ? 'bg-cyan-500/5 dark:bg-cyan-500/10 border-cyan-500/20 text-cyan-600 dark:text-cyan-400'
+                        : 'bg-gray-50 dark:bg-white/5 border-[#E0E0E0] dark:border-white/10 text-[#78909C]'
+                    }`}>
+                      <User size={14} />
+                      <span className="font-medium">{humanFile ? 'メイン ✓' : 'メイン 未設定'}</span>
+                    </div>
+                    <div className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs ${subCharFile ? 'bg-purple-50 dark:bg-purple-500/10 border-purple-200 dark:border-purple-500/20 text-purple-600 dark:text-purple-400' : 'bg-gray-50 dark:bg-white/5 border-gray-200 dark:border-white/10 text-gray-400 dark:text-gray-500'}`}>
+                      <Users size={12} />
+                      <span className="font-medium">{subCharFile ? 'IP ✓' : 'IP 未設定'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Fixed Elements Settings */}
+                <div className="glass rounded-2xl p-4 card-hover">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-1 h-5 rounded-full bg-gradient-to-b from-green-400 to-emerald-500"></div>
+                      <h2 className="text-[#333333] dark:text-gray-200 font-semibold text-sm">要素固定</h2>
+                    </div>
+                    <div className="flex items-center gap-2">
+                       <button
+                         onClick={handleGenerateFixedElements}
+                         disabled={isGeneratingFixed || !extractedPdfText}
+                         className={`px-3 py-1.5 text-[10px] sm:text-xs font-bold rounded-lg transition-colors flex items-center gap-1 ${
+                           isGeneratingFixed 
+                             ? 'bg-gray-100 text-gray-400 cursor-not-allowed dark:bg-white/5'
+                             : !extractedPdfText
+                             ? 'bg-emerald-50 text-emerald-300 border border-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-500/50 cursor-not-allowed'
+                             : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-md shadow-emerald-500/20'
+                         }`}
+                         title={!extractedPdfText ? "PDFをアップロードしてください" : ""}
+                       >
+                         {isGeneratingFixed ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                         {isGeneratingFixed ? "生成中..." : "生成する"}
+                       </button>
+
+                      <div className="relative" ref={fixedPanelRef}>
+                        <button
+                          onClick={() => setFixedPanelOpen(!fixedPanelOpen)}
+                          className="text-[10px] sm:text-xs text-emerald-600 dark:text-emerald-400 font-bold hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors"
+                        >
+                          設定を開く
+                        </button>
+                        {fixedPanelOpen && (
+                          <div className="absolute top-full right-0 mt-3 w-[400px] bg-white dark:bg-[#16161e] border border-[#E0E0E0] dark:border-white/10 rounded-2xl shadow-2xl dark:shadow-emerald-500/5 p-5 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                            <h3 className="text-[#333333] dark:text-gray-200 font-semibold text-xs mb-2">
+                              要素固定メタプロンプト
+                            </h3>
+                            <p className="text-[10px] text-[#78909C] mb-3 leading-relaxed">
+                              画像生成時に一貫して適用する、背景やトーンなどを決定するためのAIへの司令です。
+                            </p>
+                            <textarea
+                              value={fixedElementMetaPrompt}
+                              onChange={(e) => setFixedElementMetaPrompt(e.target.value)}
+                              className="w-full h-32 bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg p-3 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-emerald-500/50 transition-colors custom-scrollbar resize-y font-mono leading-relaxed"
+                            />
+                            <div className="flex gap-2 justify-between mt-3">
+                              <button
+                                onClick={() => setFixedElementMetaPrompt(DEFAULT_FIXED_META_PROMPT)}
+                                className="text-[10px] text-emerald-500 hover:text-emerald-600 underline"
+                              >
+                                デフォルトに戻す
+                              </button>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => setFixedPanelOpen(false)}
+                                  className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-[#333] text-[10px] font-bold rounded-lg transition-colors"
+                                >
+                                  キャンセル
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    localStorage.setItem('snafty_fixed_meta_prompt', fixedElementMetaPrompt);
+                                    alert('要素固定メタプロンプトを保存しました。');
+                                    setFixedPanelOpen(false);
+                                  }}
+                                  className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-[10px] font-bold rounded-lg transition-colors"
+                                >
+                                  保存して閉じる
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <textarea
+                    value={stagePrompt}
+                    onChange={(e) => setStagePrompt(e.target.value)}
+                    placeholder="例: tokyo street, cyberpunk city, interior of a cafe... (動画全体の舞台や背景の指定。自動生成された結果がここにセットされます)"
+                    className="w-full h-16 bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg p-2.5 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-emerald-500/50 transition-colors custom-scrollbar resize-y"
+                  />
+                </div>
+
+                {/* Still Image Prompt Settings */}
+                <div className="glass rounded-2xl p-4 card-hover">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-3">
+                      <div className="w-1 h-5 rounded-full bg-gradient-to-b from-orange-400 to-red-500"></div>
+                      <h2 className="text-[#333333] dark:text-gray-200 font-semibold text-sm">静止画プロンプト設定</h2>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setStillMetaPanelOpen(!stillMetaPanelOpen)}
+                        className={`text-[10px] sm:text-xs font-bold transition-colors flex items-center gap-1 ${
+                          stillMetaPanelOpen ? 'text-gray-600 dark:text-gray-300' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'
+                        }`}
+                      >
+                        プロンプト指示設定
+                        <ChevronDown size={12} className={`transition-transform duration-200 ${stillMetaPanelOpen ? 'rotate-180' : ''}`} />
+                      </button>
+                      <button
+                        onClick={() => setStillPromptPanelOpen(!stillPromptPanelOpen)}
+                        className="text-[10px] sm:text-xs text-orange-600 dark:text-orange-400 font-bold hover:text-orange-700 dark:hover:text-orange-300 transition-colors flex items-center gap-1"
+                      >
+                        設定を開く
+                        <ChevronDown size={12} className={`transition-transform duration-200 ${stillPromptPanelOpen ? 'rotate-180' : ''}`} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {stillMetaPanelOpen && (
+                    <div className="space-y-3 animate-in fade-in slide-in-from-top-2 duration-200 pt-3 border-t border-gray-200 dark:border-white/10 mt-2 mb-4 bg-gray-50 dark:bg-white/5 p-3 rounded-lg">
+                      <div>
+                        <label className="text-[10px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-2 block">
+                          [AI用] 静止画プロンプト指示 (メタプロンプト)
+                        </label>
+                        <textarea
+                          value={stillImageMetaPrompt}
+                          onChange={(e) => setStillImageMetaPrompt(e.target.value)}
+                          placeholder="AIに対するスタイル指示のルールなどを入力してください"
+                          className="w-full h-16 bg-white dark:bg-[#1a1a24] border border-gray-200 dark:border-white/10 rounded-lg p-2.5 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-gray-500/50 transition-colors custom-scrollbar resize-y"
+                        />
+                      </div>
+                      <div className="flex justify-end">
+                        <button
+                          onClick={() => {
+                            saveStillMetaPrompt();
+                            setStillMetaPanelOpen(false);
+                          }}
+                          className="px-3 py-1.5 bg-gray-200 hover:bg-gray-300 text-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700 dark:text-gray-200 text-[10px] font-bold rounded-lg transition-colors"
+                        >
+                          指示を保存して閉じる
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {stillPromptPanelOpen && (
+                    <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-200 pt-3 border-t border-gray-200 dark:border-white/10 mt-2">
+                      <div>
+                        <label className="text-[10px] items-center gap-1.5 flex font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-2">
+                          <span className="bg-yellow-400/20 text-yellow-600 dark:text-yellow-400 w-4 h-4 flex items-center justify-center rounded-full text-[9px]">1</span>
+                          画像スタイル・品質
+                        </label>
+                        <textarea
+                          value={stillImageStyle}
+                          onChange={(e) => setStillImageStyle(e.target.value)}
+                          placeholder="例: masterpiece, 8k resolution, cinematic lighting... (全カットに共通して追加するスタイルのベース指定)"
+                          className="w-full h-16 bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg p-2.5 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-yellow-500/50 transition-colors custom-scrollbar resize-y"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] items-center gap-1.5 flex font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-2">
+                          <span className="bg-purple-400/20 text-purple-600 dark:text-purple-400 w-4 h-4 flex items-center justify-center rounded-full text-[9px]">2</span>
+                          ネガティブプロンプト
+                        </label>
+                        <textarea
+                          value={stillImageNegative}
+                          onChange={(e) => setStillImageNegative(e.target.value)}
+                          placeholder="例: low quality, blurry, mutated hands... (生成してほしくない要素・状態)"
+                          className="w-full h-16 bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg p-2.5 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50 transition-colors custom-scrollbar resize-y"
+                        />
+                      </div>
+                      <div className="flex justify-end pt-2">
+                        <button
+                          onClick={() => {
+                            saveStillPrompts();
+                            setStillPromptPanelOpen(false);
+                          }}
+                          className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-[10px] font-bold rounded-lg transition-colors shadow-md shadow-orange-500/20"
+                        >
+                          保存して閉じる
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 現在の英語プロンプト表示 */}
+                  <div className="mt-3 pt-3 border-t border-gray-200 dark:border-white/10">
+                    <label className="text-[9px] font-semibold text-[#78909C] dark:text-gray-500 uppercase tracking-wider mb-1.5 block">
+                      現在のプロンプト (English)
+                    </label>
+                    <div className="bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg p-2.5 text-[10px] text-[#555] dark:text-gray-400 font-mono leading-relaxed break-all max-h-24 overflow-y-auto custom-scrollbar">
+                      {stillImageStyle || <span className="text-gray-400 dark:text-gray-600 italic">未設定</span>}
+                      {stillImageNegative && (
+                        <div className="mt-2 pt-2 border-t border-gray-200 dark:border-white/5">
+                          <span className="text-red-400 dark:text-red-500">Negative:</span> {stillImageNegative}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Generate Button */}
+                <div className="glass rounded-2xl p-4 animate-in slide-in-from-bottom-4 duration-500">
+                  <button
+                    onClick={generateAllCutImages}
+                    disabled={isGenerating}
+                    className={`w-full py-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2.5 transition-all duration-300 ${
+                      isGenerating
+                        ? 'bg-[#F5F5F5] text-[#444] cursor-not-allowed border border-[#E0E0E0]'
+                        : !humanFile
+                        ? 'bg-purple-100 text-purple-400 border border-purple-200 hover:bg-purple-200 transition-colors cursor-pointer dark:bg-purple-500/10 dark:text-purple-400 dark:border-purple-500/30'
+                        : 'bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-xl shadow-purple-500/25 hover:shadow-purple-500/40 hover:scale-[1.02]'
+                    }`}
+                  >
+                    {isGenerating ? <Loader2 size={16} className="animate-spin" /> : <ImageIcon size={16} />}
+                    {isGenerating ? `画像生成中... (${cuts.filter(c => c.isGenerating).length > 0 ? cuts.findIndex(c => c.isGenerating) + 1 : 0}/${enabledCuts.length})` : !humanFile ? '画像生成 ※要キャラクター設定' : `画像生成 (${enabledCuts.length}カット)`}
+                  </button>
+
+                  {/* Error */}
+                  {error && (
+                    <div className="mt-4 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs">
+                      {error}
+                    </div>
                   )}
                 </div>
-                {results.length > 0 && (
-                  <button
-                    onClick={() => setResults([])}
-                    className="text-[10px] text-[#78909C] hover:text-red-400 transition-colors duration-300"
-                  >
-                    すべてクリア
-                  </button>
-                )}
               </div>
-              <ResultGallery results={results} />
+
             </div>
-
-            {/* Character Sheet */}
-            {(humanPreview || humanBackPreview || uploadedGarments.length > 0) && (
-              <div className="glass rounded-2xl p-6 mt-6">
-                <div className="flex items-center gap-3 mb-5">
-                  <div className="w-1 h-6 rounded-full bg-gradient-to-b from-[#ff6b35] to-[#fbbf24]"></div>
-                  <h2 className="text-[#333333] font-semibold text-sm">キャラクターシート</h2>
-                </div>
-
-                {/* Model Row */}
-                <div className="mb-5">
-                  <p className="text-[10px] text-[#00d4ff] font-medium uppercase tracking-wider mb-3">Model</p>
-                  <div className="grid grid-cols-4 gap-3">
-                    {/* Model Front */}
-                    <div>
-                      <p className="text-[8px] text-[#00d4ff]/60 mb-1.5 text-center">Front</p>
-                      {humanPreview ? (
-                        <div className="aspect-[3/4] bg-[#FAFAFA] rounded-lg overflow-hidden border-2 border-[#00d4ff]/30">
-                          <img src={humanPreview} alt="Model Front" className="w-full h-full object-cover" />
-                        </div>
-                      ) : (
-                        <div className="aspect-[3/4] bg-[#FAFAFA] rounded-lg border border-dashed border-[#00d4ff]/20 flex items-center justify-center">
-                          <span className="text-lg opacity-20">🧑</span>
-                        </div>
-                      )}
-                    </div>
-                    {/* Model Back */}
-                    <div>
-                      <p className="text-[8px] text-[#00ff88]/60 mb-1.5 text-center">Back</p>
-                      {humanBackPreview ? (
-                        <div className="aspect-[3/4] bg-[#FAFAFA] rounded-lg overflow-hidden border-2 border-[#00ff88]/30">
-                          <img src={humanBackPreview} alt="Model Back" className="w-full h-full object-cover" />
-                        </div>
-                      ) : (
-                        <div className="aspect-[3/4] bg-[#FAFAFA] rounded-lg border border-dashed border-[#00ff88]/20 flex items-center justify-center">
-                          <span className="text-lg opacity-20">🔙</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Items Row */}
-                <div>
-                  <p className="text-[10px] text-[#00BFA5] font-medium uppercase tracking-wider mb-3">Items</p>
-                  <div className="grid grid-cols-4 gap-3">
-                    {garments.map(g => (
-                      <div key={g.id} className="space-y-1.5">
-                        <div className="flex justify-center" style={{ color: `${g.accentColor}99` }}>
-                          <span className="scale-[0.5]">{g.icon}</span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-1">
-                          {/* Front */}
-                          {g.preview ? (
-                            <div
-                              className="aspect-square bg-[#FAFAFA] rounded overflow-hidden border"
-                              style={{ borderColor: `${g.accentColor}50` }}
-                            >
-                              <img src={g.preview} alt={`${g.label} Front`} className="w-full h-full object-cover" />
-                            </div>
-                          ) : (
-                            <div
-                              className="aspect-square bg-[#FAFAFA] rounded border border-dashed flex items-center justify-center"
-                              style={{ borderColor: `${g.accentColor}20` }}
-                            >
-                              <span className="text-[8px] opacity-20">F</span>
-                            </div>
-                          )}
-                          {/* Back */}
-                          {g.backPreview ? (
-                            <div
-                              className="aspect-square bg-[#FAFAFA] rounded overflow-hidden border"
-                              style={{ borderColor: `${g.accentColor}50` }}
-                            >
-                              <img src={g.backPreview} alt={`${g.label} Back`} className="w-full h-full object-cover" />
-                            </div>
-                          ) : (
-                            <div
-                              className="aspect-square bg-[#FAFAFA] rounded border border-dashed flex items-center justify-center"
-                              style={{ borderColor: `${g.accentColor}20` }}
-                            >
-                              <span className="text-[8px] opacity-20">B</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Summary */}
-                <div className="mt-5 pt-5 border-t border-[#E0E0E0]">
-                  <div className="flex flex-wrap gap-2">
-                    <span className="text-[9px] px-2.5 py-1.5 rounded-lg bg-[#FAFAFA] text-[#78909C] border border-[#E0E0E0]">
-                      解像度: <span className="text-[#333333] font-medium">{resolution}</span>
-                    </span>
-                    <span className="text-[9px] px-2.5 py-1.5 rounded-lg bg-[#FAFAFA] text-[#78909C] border border-[#E0E0E0]">
-                      形式: <span className="text-[#333333] font-medium">{imageFormat.toUpperCase()}</span>
-                    </span>
-                    <span className="text-[9px] px-2.5 py-1.5 rounded-lg bg-[#FAFAFA] text-[#78909C] border border-[#E0E0E0]">
-                      アイテム: <span className="text-[#333333] font-medium">{uploadedGarments.length}</span>
-                    </span>
-                    {uploadedGarments.map(g => (
-                      <span
-                        key={g.id}
-                        className="text-[9px] px-2.5 py-1.5 rounded-lg text-[#333333] font-medium"
-                        style={{ backgroundColor: `${g.accentColor}30`, border: `1px solid ${g.accentColor}40` }}
-                      >
-                        <span className="scale-75 origin-left inline-flex items-center align-text-bottom mr-1">{g.icon}</span>
-                        {g.description ? g.description.substring(0, 15) + (g.description.length > 15 ? '...' : '') : g.label}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
-        </div>
         </main>
       </div>
 
-      {/* Prompt Modal */}
-      <PromptModal
-        isOpen={promptModalOpen}
-        onClose={() => {
-          setPromptModalOpen(false);
-          setPendingGarmentId(null);
-          setPendingGarmentFile(null);
-          setPendingGarmentPreview(null);
-        }}
-        onSubmit={handlePromptSubmit}
-        onOptimize={handlePromptOptimize}
-        onAnalyze={handlePromptAnalyze}
-        itemLabel={garments.find(g => g.id === pendingGarmentId)?.label || ''}
-        itemEmoji={garments.find(g => g.id === pendingGarmentId)?.icon || ''}
-        accentColor={garments.find(g => g.id === pendingGarmentId)?.accentColor || '#a78bfa'}
-        previewUrl={pendingGarmentPreview}
-        initialDescription={garments.find(g => g.id === pendingGarmentId)?.description || ''}
-      />
-
-      {/* TryOn Prompt Modal */}
-      <TryOnPromptModal
-        isOpen={tryOnModalOpen}
-        onClose={() => {
-          setTryOnModalOpen(false);
-          setReusedPrompt(undefined);
-        }}
-        onGenerate={handleGenerateWithPrompt}
-        onGenerateQuestions={handleGenerateQuestions}
-        onGeneratePromptFromAnswers={handleGeneratePromptFromAnswers}
-        onOptimizePrompt={handleOptimizeTryOnPrompt}
-        modelPreview={humanPreview}
-        garmentPreviews={garments.map(g => ({
-          emoji: g.icon,
-          preview: g.preview,
-          label: g.label,
-        }))}
-        isGeneratingQuestions={isGeneratingQuestions}
-        isGeneratingTryOn={isGenerating}
-        initialPrompt={reusedPrompt}
-      />
-
-      {/* Pose Analysis Modal */}
-      {poseQuestionResult && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
-            <div className="p-4 border-b border-[#E0E0E0] shrink-0 bg-[#F8FAFC]">
-              <h2 className="text-sm font-bold text-[#333333] flex items-center gap-2">
-                <span className="text-xl">✨</span> AIポーズ分析
-              </h2>
-            </div>
-            
-            <div className="p-6 overflow-y-auto">
-              <p className="text-sm text-[#333333] mb-6 leading-relaxed bg-[#f0f9ff] p-4 rounded-xl border border-[#bae6fd]">
-                {poseQuestionResult.question}
-              </p>
-              
-              <div className="space-y-3">
-                {poseQuestionResult.options.map((option, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => {
-                      setSelectedPose(`${poseQuestionResult.detectedPose} (${option})`);
-                      setPoseQuestionResult(null);
-                    }}
-                    className="w-full text-left p-4 rounded-xl border border-[#E0E0E0] hover:border-[#00BFA5] hover:bg-[#00BFA5]/5 hover:shadow-md transition-all group"
-                  >
-                    <div className="flex items-center">
-                      <div className="w-6 h-6 rounded-full border-2 border-[#E0E0E0] group-hover:border-[#00BFA5] flex items-center justify-center mr-3 shrink-0">
-                        <div className="w-2.5 h-2.5 rounded-full bg-[#00BFA5] opacity-0 group-hover:opacity-100 transition-opacity" />
-                      </div>
-                      <span className="text-sm text-[#333333] font-medium">{option}</span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
+      {/* History Section */}
+      {results.length > 0 && (
+        <div className="max-w-6xl mx-auto px-6 pb-20 fade-in">
+          <h2 className="text-[#333333] dark:text-gray-200 font-semibold text-lg mb-6 flex items-center gap-2">
+            <span className="w-1.5 h-6 rounded-full bg-gradient-to-b from-cyan-400 to-purple-500"></span>
+            生成履歴
+          </h2>
+          <div className="glass rounded-2xl p-6">
+            <ResultGallery results={results} />
           </div>
         </div>
       )}
 
-      {/* History Panel */}
-      <HistoryPanel
-        isOpen={isHistoryOpen}
-        onClose={() => navigate('/')}
-        onSelectEntry={(entry) => setResults(prev => [
-          { 
-            id: Date.now().toString(), 
-            imageUrl: entry.imageUrl, 
-            garmentLabels: entry.garmentLabels,
-            projectId: 'default',
-            timestamp: new Date()
-          },
-          ...prev
-        ])}
-        onReusePrompt={(prompt) => {
-          setReusedPrompt(prompt);
-          setTryOnModalOpen(true);
-          navigate('/');
+      {/* Short Video Modal */}
+      <ShortVideoModal
+        isOpen={videoModalOpen}
+        onClose={() => setVideoModalOpen(false)}
+        humanFile={humanFile}
+        subCharacterFile={subCharFile}
+        subCharPrompt={subCharPrompt}
+        mainCharPrompt={mainCharPrompt}
+        stillImageStyle={stillImageStyle}
+        stillImageNegative={stillImageNegative}
+        semanticPrompt={semanticPrompt}
+        productPrompt={productPrompt}
+        stagePrompt={stagePrompt}
+        cuts={cuts}
+        setCuts={setCuts}
+        onGenerateSuccess={(newResults) => {
+          setResults(prev => [...newResults, ...prev]);
         }}
+      />
+
+      {/* Storyboard Workflow Modal */}
+      <StoryboardWorkflowModal
+        isOpen={storyboardModalOpen}
+        onClose={() => setStoryboardModalOpen(false)}
+        aiModel={aiModel}
+        existingCharacterFile={humanFile}
       />
     </div>
   );

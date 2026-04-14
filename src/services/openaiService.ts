@@ -72,7 +72,8 @@ export async function generateQuestions(
   modelImageBase64: string,
   garmentImageBase64: string,
   garmentDescription?: string,
-  selectedPose?: string
+  selectedPose?: string,
+  garmentType?: string
 ): Promise<Question[]> {
   const systemPrompt = `あなたはプロのファッションスタイリスト兼バーチャル試着AIアシスタントです。
 
@@ -102,19 +103,16 @@ ${selectedPose ? `【指定されているポーズ】: ${selectedPose}` : ''}
 以下の「着こなし方」や「ポーズ」についてのみ質問してください：
 
 【着用方法】
-- ボタンやファスナーを開けるか閉めるか
-- 袖をまくるかどうか
-- 裾をインするか出すか
+対象の衣服がトップスか、ボトムスか、ワンピースか等を判断し、それに合った質問にしてください。
+- トップスの場合は、ボタン/ファスナーの開閉、袖のまくり方、裾をインするか出すかなど。
+- ボトムスの場合は、ロールアップの有無、ウエスト位置（ハイウエスト等）、ベルトの有無など。
+- シューズの場合は紐の結び方など。
 
 【フィット感】
 - タイト/ジャスト/ゆったりのどれで着るか
 
 【スタイリング】
 - 全体の雰囲気（カジュアル/きれいめ等）
-
-【ポーズ・姿勢】
-${selectedPose ? `- ユーザーは既にポーズ「${selectedPose}」を参考として指定しています。このポーズを活かすか、それとも調整するか（例えば目線、手の細かい位置など）について質問してください。` : `- モデル画像のポーズを分析し、それを維持するか、別のポーズ（ポケットに手を入れる、腕を組む、横向き、振り返る、歩く姿など）に変更するか質問してください。`}
-
 服のデザイン自体に関する質問は絶対にしないでください。
 JSON配列形式で返してください。`;
 
@@ -148,7 +146,72 @@ JSON配列形式で返してください。`;
     console.error('Failed to parse questions:', e);
   }
 
-  // フォールバック質問（着こなし方のみ - 服のデザインは変更しない）
+  // フォールバック質問（衣服タイプに応じて分岐）
+  const isBottom = garmentType === 'bottom' || /ボトム|パンツ|ズボン|スカート|pants|skirt|bottom|trousers|jeans|shorts/i.test(garmentDescription || '');
+  const isDress = garmentType === 'dress' || /ワンピース|ドレス|セットアップ|dress|onepiece/i.test(garmentDescription || '');
+  const isShoes = garmentType === 'shoes' || /シューズ|靴|スニーカー|shoes|sneaker|boot/i.test(garmentDescription || '');
+
+  if (isBottom) {
+    return [
+      {
+        id: 'q1',
+        question: '丈の見せ方はどうしますか？',
+        options: ['そのままの丈で', 'ロールアップ', '裾を折り返す'],
+      },
+      {
+        id: 'q2',
+        question: 'フィット感はどうしますか？',
+        options: ['タイトめ', 'ジャストサイズ', 'ややゆったり', 'ワイド'],
+      },
+      {
+        id: 'q3',
+        question: 'ウエスト位置はどうしますか？',
+        options: ['ハイウエスト', 'ジャストウエスト', 'ローウエスト'],
+      },
+      {
+        id: 'q4',
+        question: '全体の雰囲気は？',
+        options: ['カジュアル', 'きれいめ', 'クール', 'リラックス'],
+      },
+    ];
+  }
+
+  if (isDress) {
+    return [
+      {
+        id: 'q1',
+        question: 'フィット感はどうしますか？',
+        options: ['タイトめ', 'ジャストサイズ', 'ややゆったり', 'フレア'],
+      },
+      {
+        id: 'q2',
+        question: 'ウエストの見せ方は？',
+        options: ['自然なまま', 'ベルトでマーク', 'ウエストを絞る'],
+      },
+      {
+        id: 'q3',
+        question: '全体の雰囲気は？',
+        options: ['カジュアル', 'きれいめ', 'エレガント', 'リラックス'],
+      },
+    ];
+  }
+
+  if (isShoes) {
+    return [
+      {
+        id: 'q1',
+        question: '靴紐やストラップは？',
+        options: ['しっかり結ぶ', 'ゆるめに', '紐なし/該当なし'],
+      },
+      {
+        id: 'q2',
+        question: '全体の雰囲気は？',
+        options: ['カジュアル', 'きれいめ', 'スポーティ', 'クール'],
+      },
+    ];
+  }
+
+  // デフォルト（トップス等）
   return [
     {
       id: 'q1',
@@ -181,12 +244,27 @@ export async function generatePromptFromAnswers(
   garmentImageBase64: string,
   questions: Question[],
   garmentDescription?: string,
-  selectedPose?: string
+  selectedPose?: string,
+  garmentCategory?: string
 ): Promise<string> {
   const answeredQuestions = questions
     .filter(q => q.answer)
     .map(q => `- ${q.question}: ${q.answer}`)
     .join('\n');
+
+  // レイヤリングコンテキスト
+  let layeringContext = '';
+  if (garmentCategory === 'outer') {
+    layeringContext = '\n\nLAYERING RULE: This is an OUTER garment (jacket/coat). The person\'s existing inner clothing (t-shirt, shirt, etc.) MUST be preserved exactly as shown in the model image. Layer the new outerwear ON TOP.';
+  } else if (garmentCategory === 'bottom') {
+    layeringContext = '\n\nLAYERING RULE: This is a BOTTOM garment (pants/skirt). The person\'s existing upper body clothing MUST be preserved exactly as shown in the model image. Only the lower body garment changes.';
+  } else if (garmentCategory === 'shoes') {
+    layeringContext = '\n\nLAYERING RULE: These are SHOES. ALL of the person\'s existing clothing MUST be preserved. Only change their footwear.';
+  } else if (garmentCategory === 'accessory') {
+    layeringContext = '\n\nLAYERING RULE: This is an ACCESSORY. ALL of the person\'s existing clothing MUST be preserved. Only add the accessory.';
+  } else if (garmentCategory === 'top') {
+    layeringContext = '\n\nLAYERING RULE: This is a TOP garment. If the person is wearing an undershirt, camisole, or tank top underneath, PRESERVE that inner layer. Replace only the main top garment with the new item.';
+  }
 
   const systemPrompt = `You are a prompt engineer for Fal.ai Flux/Nanobanana2 virtual try-on image generation.
 
@@ -199,6 +277,11 @@ The garment in the image MUST be reproduced with 100% accuracy:
 - The garment should look IDENTICAL to the source image
 
 Your task is to create a prompt that preserves all garment details while applying the user's styling preferences.
+
+=== STRICT CONSTRAINTS ON EDITS ===
+- DO NOT add any extra accessories (e.g., hats, sunglasses, jewelry, bags) unless explicitly requested in the user preferences.
+- DO NOT change the person's pose or posture unless explicitly requested in the user preferences.
+- Maintain the original subject's appearance and pose by default.
 
 Output format:
 
@@ -219,53 +302,36 @@ Output format:
 === NEGATIVE PROMPT ===
 
 [Avoid]
-(Things to avoid, including any garment alterations)`;
+(altered garment design, missing details, wrong number of buttons, extra accessories, hats, sunglasses, jewelry, changed pose)`;
 
-const userPrompt = `Create a virtual try-on prompt.
 
-CRITICAL: The garment must be reproduced with 100% accuracy - every detail (buttons, pockets, logos, patterns, stitches, decorations) must be preserved exactly as shown in the image.
-
-${garmentDescription ? `Garment description: ${garmentDescription}\n` : ''}
-${selectedPose ? `Target Pose / Posture: ${selectedPose}\n` : ''}
-User's styling preferences (how to wear it):
-${answeredQuestions}
-
-Generate the prompt now:
-
-=== POSITIVE PROMPT ===
-
-[Garment Fidelity - MOST IMPORTANT]
-Exact reproduction of the garment with all original details preserved: every button, zipper, pocket, logo, pattern, stitch, and decoration exactly as shown in the reference image, identical colors and textures, no modifications to the original design
-
-[Subject]
-A person wearing the exact garment from the reference image, matching the user's requested pose and posture
-
-[Styling & Pose]
-(Apply user preferences for styling and pose here)
-
-[Quality]
-High quality fashion photography, photorealistic, detailed fabric textures, professional studio lighting, 8k resolution, sharp focus, accurate garment reproduction
-
-=== NEGATIVE PROMPT ===
-
-[Avoid]
-altered garment design, missing buttons, wrong number of pockets, changed patterns, modified logos, different decorations, simplified details, low quality, blurry, distorted, deformed, bad anatomy, wrong proportions, extra limbs, missing limbs, watermark, signature, text
-
-Generate in English only:`;
 
   const messages: ConversationMessage[] = [
     { role: 'system', content: systemPrompt },
     {
       role: 'user',
       content: [
-        { type: 'text', text: userPrompt },
+        { type: 'text', text: `Generate the final try-on prompt. TRANSLATE ALL CONTENT TO ENGLISH. The entire output must be IN ENGLISH.
+
+CRITICAL INSTRUCTION - DO NOT FAIL:
+You MUST accurately reproduce all physical details from the Garment Analysis. If the analysismentions "6 buttons", "chest pocket", or specific patterns, you MUST explicitly include those exact quantities and descriptions in the [Garment Fidelity] section of your output. Do not summarize or omit any hardware or structural details.
+
+Garment Analysis / Description:
+${garmentDescription || 'Unknown garment'}
+
+User Preferences (How to wear it):
+${answeredQuestions}
+
+Selected Pose (Reference):
+${selectedPose || 'No specific pose requested. Use user preferences.'}
+${layeringContext}` },
         {
           type: 'image_url',
           image_url: { url: modelImageBase64, detail: 'low' },
         },
         {
           type: 'image_url',
-          image_url: { url: garmentImageBase64, detail: 'low' },
+          image_url: { url: garmentImageBase64, detail: 'high' },
         },
       ],
     },
@@ -286,10 +352,13 @@ export async function optimizeTryOnPrompt(currentPrompt: string): Promise<string
 === CRITICAL: GARMENT FIDELITY MUST BE PRESERVED ===
 
 When optimizing, you MUST:
-- Keep ALL garment details (buttons, pockets, logos, patterns, decorations) exactly as described
-- NEVER remove or simplify any garment-specific details
+- TRANSLATE everything to ENGLISH
+- Keep ALL garment details exactly as described. If the input mentions constraints like "6 buttons", "chest pocket", "lace-up", you MUST explicitly write them down in the output prompt.
+- NEVER remove, summarize, or simplify any garment-specific details
 - Add quality enhancers without changing the garment description
-- Ensure the negative prompt includes "altered garment design, missing details"
+- STRICT RULE: DO NOT add any extra accessories (hats, sunglasses, jewelry, etc) unless explicitly requested.
+- STRICT RULE: DO NOT change the person's pose unless explicitly requested. Keep the original pose.
+- Ensure the negative prompt includes "altered garment design, missing details, wrong number of buttons, extra accessories, hats, sunglasses, jewelry, changed pose"
 
 Output format:
 
@@ -314,13 +383,14 @@ Output format:
     },
     {
       role: 'user',
-      content: `Optimize this prompt while PRESERVING all garment details exactly as described:
+      content: `Optimize this prompt while PRESERVING all garment details exactly as described.
+TRANSLATE THE PROMPT TO ENGLISH IF IT IS IN JAPANESE. The final output must be ENTIRELY in English.
 
 ${currentPrompt}
 
 IMPORTANT: Do not remove or simplify any garment-specific details (buttons, pockets, logos, patterns, etc.)
 
-Output the optimized prompt only:`,
+Output the optimized English prompt only:`,
     },
   ];
 
@@ -377,32 +447,72 @@ export interface GarmentAnalysisChatGPT extends GarmentAnalysis {}
 /**
  * ChatGPTで服の画像を詳細に分析
  */
-export async function analyzeGarmentWithChatGPT(garmentImageBase64: string): Promise<GarmentAnalysisChatGPT> {
-  const systemPrompt = `あなたはファッション分析の専門家です。服の画像を詳細に分析し、以下のJSON形式で日本語で回答してください。
+export async function analyzeGarmentWithChatGPT(garmentImageBase64: string, category?: string): Promise<GarmentAnalysisChatGPT> {
+  // カテゴリ別の分析フィールドを構築
+  let jsonTemplate: string;
+  let analyzeText: string;
 
-{
-  "type": "服の種類（例：シャツ、ジャケット、ワンピース等）",
-  "color": "色（例：ネイビー、白、マルチカラー等）",
-  "pattern": "柄・パターン（例：無地、ストライプ、チェック、花柄等。なければ「無地」）",
-  "buttons": "ボタンの数と種類（例：前ボタン6個（プラスチック製）、なければ「なし」）",
-  "pockets": "ポケットの数と位置（例：胸ポケット1個、サイドポケット2個、なければ「なし」）",
-  "collar": "襟の形状（例：レギュラーカラー、スタンドカラー、なければ「なし」）",
-  "sleeves": "袖の形状（例：長袖、半袖、ノースリーブ等）",
-  "decorations": "その他の装飾・ディテール（例：刺繍、レース、リボン、ジッパー、スタッズ等。なければ「特になし」）",
-  "material": "推定される素材感（例：コットン、シルク、デニム、ニット等）",
-  "brand": "見えるブランドロゴやタグ（なければ「確認できず」）",
-  "summary": "英語での簡潔な要約（1-2文）"
-}
+  if (category === 'shoes') {
+    jsonTemplate = `{
+  "type": "靴の種類（例：スニーカー、ブーツ、ローファー、パンプス、サンダルなど）",
+  "color": "色（例：黒、白、茶色、マルチカラーなど）",
+  "pattern": "柄やテクスチャ（例：無地、ツートン、アニマル柄など。無地の場合は '無地'）",
+  "buttons": "留め具の種類（例：紐、スリッポン、ベルクロ、バックル、ジッパー）",
+  "pockets": "ソールの種類（例：ラバーソール、レザーソール、プラットフォーム、フラット）",
+  "collar": "ヒールの高さ・種類（例：フラット、ローヒール、ハイヒール、ウェッジ。ない場合は 'フラット'）",
+  "sleeves": "つま先の形状（例：ラウンドトゥ、ポインテッドトゥ、オープントゥ、スクエアトゥ）",
+  "decorations": "装飾（例：ロゴ、ステッチ、スタッズ、ストラップ。ない場合は 'なし'）",
+  "material": "素材（例：レザー、キャンバス、スエード、メッシュ、合成皮革など）",
+  "brand": "見えるブランドロゴやタグ（わからない場合は '不明'）",
+  "summary": "Concise English summary for image generation prompt (1-2 sentences)"
+}`;
+    analyzeText = 'この靴/フットウェアの画像を詳細に分析してください。';
+  } else if (category === 'accessory') {
+    jsonTemplate = `{
+  "type": "アクセサリーの種類（例：時計、バッグ、帽子、マフラー、サングラス、ベルトなど）",
+  "color": "色（例：ゴールド、シルバー、黒、茶色など）",
+  "pattern": "柄やデザイン（例：無地、モノグラム、プリント。無地の場合は '無地'）",
+  "buttons": "留め具（例：クラスプ、バックル、マグネット、ジッパー。ない場合は 'なし'）",
+  "pockets": "コンパートメントやセクション（バッグの場合：ポケットの数など。該当しない場合は 'なし'）",
+  "collar": "シルエット・形状（例：ラウンドフェイスの時計、トートバッグ、バケットハットなど）",
+  "sleeves": "サイズ感（例：スモール、ミディアム、ラージ、オーバーサイズ）",
+  "decorations": "ディテール（例：宝石、刻印、チャーム、金具、ロゴなど。ない場合は 'なし'）",
+  "material": "素材（例：金属、レザー、布地、プラスチック、金メッキなど）",
+  "brand": "見えるブランドロゴやタグ（わからない場合は '不明'）",
+  "summary": "Concise English summary for image generation prompt (1-2 sentences)"
+}`;
+    analyzeText = 'このアクセサリーの画像を詳細に分析してください。';
+  } else {
+    // デフォルト: 衣服（トップス、ボトムス、アウター、ワンピース等）
+    jsonTemplate = `{
+  "type": "服の種類（例：シャツ、ジャケット、パンツ、スカート、ワンピースなど）",
+  "color": "色（例：ネイビー、白、マルチカラーなど）",
+  "pattern": "柄（例：無地、ストライプ、チェック、花柄など。無地の場合は '無地'）",
+  "buttons": "ボタンの数や種類（例：フロントボタン6個。ない場合は 'なし'）",
+  "pockets": "ポケットの数や位置（例：胸ポケット1個。ない場合は 'なし'）",
+  "collar": "襟の形（例：レギュラーカラー、スタンドカラー。ボトムスの場合は 'なし'）",
+  "sleeves": "袖の種類（例：長袖、半袖。ボトムスの場合は 'なし'）",
+  "decorations": "その他のディテール（例：タック、センタープレス、ジッパー、刺繍など。ない場合は 'なし'）",
+  "material": "素材感（例：コットン、シルク、デニム、ニットなど）",
+  "brand": "見えるブランドロゴやタグ（わからない場合は '不明'）",
+  "summary": "Concise English summary for image generation prompt (1-2 sentences)"
+}`;
+    analyzeText = 'この服の画像を詳細に分析してください。';
+  }
 
-画像から確認できる情報のみを記載し、推測は最小限にしてください。
-JSONのみを出力してください。`;
+  const systemPrompt = `You are a professional fashion analyst. Analyze the image in detail and respond in the following JSON format. Most fields MUST be IN JAPANESE, except the "summary" field which MUST be IN ENGLISH.
+
+${jsonTemplate}
+
+Only describe what is visible in the image. Keep speculation to a minimum.
+Output JSON only.`;
 
   const messages: ConversationMessage[] = [
     { role: 'system', content: systemPrompt },
     {
       role: 'user',
       content: [
-        { type: 'text', text: 'この服の画像を詳細に分析してください。' },
+        { type: 'text', text: analyzeText },
         {
           type: 'image_url',
           image_url: { url: garmentImageBase64, detail: 'high' },
@@ -422,18 +532,18 @@ JSONのみを出力してください。`;
     console.error('Failed to parse ChatGPT garment analysis:', e);
   }
 
-  // フォールバック
+  // Fallback
   return {
-    type: '不明',
-    color: '不明',
-    pattern: '不明',
-    buttons: '確認中',
-    pockets: '確認中',
-    collar: '確認中',
-    sleeves: '確認中',
-    decorations: '確認中',
-    material: '不明',
-    brand: '確認できず',
+    type: 'unknown',
+    color: 'unknown',
+    pattern: 'unknown',
+    buttons: 'pending',
+    pockets: 'pending',
+    collar: 'pending',
+    sleeves: 'pending',
+    decorations: 'pending',
+    material: 'unknown',
+    brand: 'unidentified',
     summary: 'Analysis pending',
   };
 }

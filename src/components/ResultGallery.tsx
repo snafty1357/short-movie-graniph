@@ -139,11 +139,19 @@ const ResultGallery: React.FC<ResultGalleryProps> = ({ results }) => {
                 {item.timestamp.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
               </span>
             </div>
-            <div className="aspect-[3/4]">
+            <div
+              className="aspect-[3/4]"
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData('text/plain', item.imageUrl);
+                e.dataTransfer.setData('application/x-tryon-result', item.imageUrl);
+                e.dataTransfer.effectAllowed = 'copy';
+              }}
+            >
               <img
                 src={item.imageUrl}
                 alt="Generated try-on"
-                className="w-full h-full object-cover"
+                className="w-full h-full object-cover pointer-events-none"
               />
             </div>
             <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-white/90 via-white/60 to-transparent p-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300">

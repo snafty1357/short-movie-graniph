@@ -4,7 +4,8 @@
   "installCommand": "npm install",
   "framework": "vite",
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/proxy" },
+    { "source": "/api/openai", "destination": "/api/openai" },
+    { "source": "/api/proxy", "destination": "/api/proxy" },
     { "source": "/(.*)", "destination": "/" }
   ]
 }

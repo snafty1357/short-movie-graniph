@@ -8,10 +8,11 @@ interface ImageUploaderProps {
   onClear: () => void;
   accentColor: string;
   hint?: string;
+  compact?: boolean;
 }
 
 const ImageUploader: React.FC<ImageUploaderProps> = ({
-  label, icon, previewUrl, onFileSelect, onClear, accentColor, hint
+  label, icon, previewUrl, onFileSelect, onClear, accentColor, hint, compact = false
 }) => {
   const [isDragging, setIsDragging] = useState(false);
 
@@ -27,13 +28,31 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({
     setIsDragging(false);
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
+
+    // 1. ファイルドロップ（従来通り）
     const file = e.dataTransfer.files[0];
     if (file && file.type.startsWith('image/')) {
       onFileSelect(file);
+      return;
+    }
+
+    // 2. URL / Base64 ドロップ（生成結果画像などから）
+    const imageUrl = e.dataTransfer.getData('application/x-tryon-result') ||
+                     e.dataTransfer.getData('text/plain');
+    if (imageUrl && (imageUrl.startsWith('data:image') || imageUrl.startsWith('http'))) {
+      try {
+        const response = await fetch(imageUrl);
+        const blob = await response.blob();
+        const ext = blob.type.split('/')[1] || 'png';
+        const imageFile = new File([blob], `dropped-result.${ext}`, { type: blob.type });
+        onFileSelect(imageFile);
+      } catch (err) {
+        console.error('Failed to load dropped image:', err);
+      }
     }
   }, [onFileSelect]);
 
@@ -58,19 +77,29 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({
       {previewUrl ? (
         <div className="relative group">
           <div
-            className="w-full aspect-[3/4] bg-[#FAFAFA] rounded-xl overflow-hidden transition-all duration-300 group-hover:shadow-xl"
+            className={`w-full ${compact ? 'aspect-square' : 'aspect-[3/4]'} bg-[#FAFAFA] rounded-xl overflow-hidden transition-all duration-300 group-hover:shadow-xl ${isDragging ? 'ring-2 ring-offset-2' : ''}`}
             style={{
-              border: `2px solid ${accentColor}30`,
-              boxShadow: `0 0 0 0 ${accentColor}00`,
+              border: isDragging ? `2px solid ${accentColor}` : `2px solid ${accentColor}30`,
+              boxShadow: isDragging ? `0 0 20px ${accentColor}30` : `0 0 0 0 ${accentColor}00`,
             }}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
           >
             <img
               src={previewUrl}
               alt={label}
-              className="w-full h-full object-contain transition-transform duration-500 group-hover:scale-[1.02]"
+              className={`w-full h-full object-contain transition-all duration-500 group-hover:scale-[1.02] ${isDragging ? 'opacity-40 scale-95' : ''}`}
             />
             {/* Overlay gradient */}
             <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+            {/* Drop indicator */}
+            {isDragging && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/70 z-10">
+                <div className="text-3xl mb-2">📥</div>
+                <p className="text-xs font-bold" style={{ color: accentColor }}>ここにドロップして差し替え</p>
+              </div>
+            )}
           </div>
 
           {/* Clear button */}
@@ -96,7 +125,7 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({
       ) : (
         <label
           htmlFor={inputId}
-          className={`w-full aspect-[3/4] rounded-xl border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-all duration-300 ${
+          className={`w-full ${compact ? 'aspect-square' : 'aspect-[3/4]'} rounded-xl border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-all duration-300 ${
             isDragging ? 'scale-[1.02]' : 'hover:scale-[1.01]'
           }`}
           style={{
