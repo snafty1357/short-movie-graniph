@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { FileText, Sparkles, ChevronDown, ChevronUp, Loader2, AlertCircle, Check, BookOpen, Settings2, X, Code2, Camera, Aperture, Focus } from 'lucide-react';
+import { FileText, Sparkles, ChevronDown, ChevronUp, Loader2, AlertCircle, Check, BookOpen, Settings2, X, Code2 } from 'lucide-react';
 import {
   extractTextFromPdf,
   generateCutComposition,
@@ -24,7 +24,7 @@ interface StoryPdfUploaderProps {
 }
 
 type Step = 'idle' | 'extracting' | 'extracted' | 'generating' | 'done' | 'error';
-type InputMode = 'pdf' | 'json' | 'camera';
+type InputMode = 'pdf' | 'json';
 
 const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
   onCutsGenerated,
@@ -57,13 +57,6 @@ const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
   const [showSettings, setShowSettings] = useState(false);
   const [showExtractedText, setShowExtractedText] = useState(false);
   const [showRawResponse, setShowRawResponse] = useState(false);
-
-  // カメラ・画質設定
-  const [cameraType, setCameraType] = useState('cinematic');
-  const [lensType, setLensType] = useState('50mm');
-  const [depthOfField, setDepthOfField] = useState('medium');
-  const [imageQuality, setImageQuality] = useState('high');
-  const [colorGrade, setColorGrade] = useState('natural');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
@@ -491,17 +484,6 @@ const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
                 <Code2 size={13} />
                 JSON
               </button>
-              <button
-                onClick={() => setInputMode('camera')}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-bold transition-all ${
-                  inputMode === 'camera'
-                    ? 'bg-cyan-500 text-white'
-                    : 'bg-white dark:bg-white/5 text-[#78909C] hover:text-[#333] dark:hover:text-white hover:bg-gray-50 dark:hover:bg-white/10'
-                }`}
-              >
-                <Camera size={13} />
-                撮影設定
-              </button>
             </div>
 
             {/* PDF モード */}
@@ -549,134 +531,6 @@ const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
                   <Code2 size={16} />
                   JSONからカット割りを取り込む
                 </button>
-              </div>
-            )}
-
-            {/* 撮影設定モード */}
-            {inputMode === 'camera' && (
-              <div className="bg-gradient-to-br from-slate-50 to-gray-50 dark:from-white/[0.03] dark:to-white/[0.01] border border-[#E0E0E0] dark:border-white/10 rounded-xl p-4 space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  {/* 左列 */}
-                  <div className="space-y-4">
-                    {/* カメラタイプ */}
-                    <div>
-                      <label className="text-[10px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block flex items-center gap-1">
-                        <Camera size={11} />
-                        カメラタイプ
-                      </label>
-                      <select
-                        value={cameraType}
-                        onChange={(e) => setCameraType(e.target.value)}
-                        className="w-full bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50"
-                      >
-                        <option value="cinematic">シネマティック</option>
-                        <option value="documentary">ドキュメンタリー</option>
-                        <option value="fashion">ファッション</option>
-                        <option value="portrait">ポートレート</option>
-                        <option value="commercial">コマーシャル</option>
-                      </select>
-                    </div>
-
-                    {/* レンズ */}
-                    <div>
-                      <label className="text-[10px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block flex items-center gap-1">
-                        <Aperture size={11} />
-                        レンズ
-                      </label>
-                      <div className="flex flex-wrap gap-1.5">
-                        {['24mm', '35mm', '50mm', '85mm', '135mm'].map(lens => (
-                          <button
-                            key={lens}
-                            onClick={() => setLensType(lens)}
-                            className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all ${
-                              lensType === lens
-                                ? 'bg-cyan-500 text-white shadow-sm'
-                                : 'bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 text-[#78909C] hover:text-[#333] dark:hover:text-white'
-                            }`}
-                          >
-                            {lens}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* 被写界深度（ボケ） */}
-                    <div>
-                      <label className="text-[10px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block flex items-center gap-1">
-                        <Focus size={11} />
-                        被写界深度（ボケ）
-                      </label>
-                      <div className="flex gap-1.5">
-                        {[
-                          { value: 'shallow', label: '浅い', desc: 'f/1.4 強ボケ' },
-                          { value: 'medium', label: '中', desc: 'f/2.8' },
-                          { value: 'deep', label: '深い', desc: 'f/8 全体鮮明' },
-                        ].map(dof => (
-                          <button
-                            key={dof.value}
-                            onClick={() => setDepthOfField(dof.value)}
-                            className={`flex-1 px-2 py-2 rounded-lg text-center transition-all ${
-                              depthOfField === dof.value
-                                ? 'bg-cyan-500 text-white shadow-sm'
-                                : 'bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 text-[#78909C] hover:text-[#333] dark:hover:text-white'
-                            }`}
-                          >
-                            <div className="text-[10px] font-bold">{dof.label}</div>
-                            <div className="text-[8px] opacity-70">{dof.desc}</div>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 右列 */}
-                  <div className="space-y-4">
-                    {/* 画質 */}
-                    <div>
-                      <label className="text-[10px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">
-                        画質
-                      </label>
-                      <select
-                        value={imageQuality}
-                        onChange={(e) => setImageQuality(e.target.value)}
-                        className="w-full bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50"
-                      >
-                        <option value="ultra">Ultra (8K) - 最高品質</option>
-                        <option value="high">High (4K) - 高品質</option>
-                        <option value="standard">Standard (HD)</option>
-                      </select>
-                    </div>
-
-                    {/* カラーグレード */}
-                    <div>
-                      <label className="text-[10px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">
-                        カラーグレード
-                      </label>
-                      <select
-                        value={colorGrade}
-                        onChange={(e) => setColorGrade(e.target.value)}
-                        className="w-full bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50"
-                      >
-                        <option value="natural">ナチュラル</option>
-                        <option value="cinematic">シネマティック</option>
-                        <option value="vintage">ヴィンテージ</option>
-                        <option value="highContrast">ハイコントラスト</option>
-                        <option value="softPastel">ソフトパステル</option>
-                        <option value="moody">ムーディー</option>
-                      </select>
-                    </div>
-
-                    {/* 現在の設定サマリー */}
-                    <div className="bg-cyan-50 dark:bg-cyan-500/10 border border-cyan-200 dark:border-cyan-500/20 rounded-xl p-3">
-                      <div className="text-[10px] font-bold text-cyan-600 dark:text-cyan-400 mb-2">現在の設定</div>
-                      <div className="text-[10px] text-cyan-700 dark:text-cyan-300 space-y-1">
-                        <p>📷 {cameraType === 'cinematic' ? 'シネマティック' : cameraType === 'documentary' ? 'ドキュメンタリー' : cameraType === 'fashion' ? 'ファッション' : cameraType === 'portrait' ? 'ポートレート' : 'コマーシャル'} / {lensType}</p>
-                        <p>🎨 {colorGrade === 'natural' ? 'ナチュラル' : colorGrade === 'cinematic' ? 'シネマティック' : colorGrade === 'vintage' ? 'ヴィンテージ' : colorGrade === 'highContrast' ? 'ハイコントラスト' : colorGrade === 'softPastel' ? 'ソフトパステル' : 'ムーディー'} / {imageQuality === 'ultra' ? '8K' : imageQuality === 'high' ? '4K' : 'HD'}</p>
-                        <p>✨ ボケ: {depthOfField === 'shallow' ? '強（f/1.4）' : depthOfField === 'medium' ? '中（f/2.8）' : '弱（f/8）'}</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
               </div>
             )}
           </div>
