@@ -12,8 +12,8 @@ const ShortVideoModal = lazy(() => import('./components/ShortVideoModal'));
 const StoryPdfUploader = lazy(() => import('./components/StoryPdfUploader'));
 const StoryboardWorkflowModal = lazy(() => import('./components/StoryboardWorkflowModal'));
 
-import { User, Users, Sun, Moon, UserCircle, RotateCcw, RefreshCw, Pencil, ChevronDown, Sparkles, Image as ImageIcon, Loader2, Upload, Play, BookOpen, History, Save, Trash2, FolderOpen, Maximize2, X, Plus, Search, Download, Camera, Aperture, Focus, Film } from 'lucide-react';
-import { generatePose, fileToDataUrl } from './services/falService';
+import { User, Users, Sun, Moon, UserCircle, RotateCcw, RefreshCw, Pencil, ChevronDown, Sparkles, Image as ImageIcon, Loader2, Upload, Play, BookOpen, History, Save, Trash2, FolderOpen, Maximize2, X, Plus, Search, Download, Camera, Aperture, Focus, Film, Video } from 'lucide-react';
+import { generatePose, fileToDataUrl, generateKlingVideo } from './services/falService';
 import { generateFixedElements, generateCutComposition, compositionRowToCutItem, DEFAULT_FIXED_META_PROMPT, DEFAULT_REGULATION, DEFAULT_META_PROMPT, type AiModelType } from './services/storyPdfService';
 import { getEnabledAiModels, getSelectedModelId, setSelectedModelId, getProviderFromModelId, type AiModelVersion } from './services/aiModelConfig';
 import { getProjectHistory, saveToProjectHistory, removeFromProjectHistory, generateProjectName, DEFAULT_BUDGET, type ProjectHistoryEntry, type ProjectBudget, type GenerationTimes } from './services/projectHistoryService';
@@ -866,6 +866,109 @@ JSON配列形式で出力してください。`
     } catch (err) {
       console.error(`Cut ${cutId} generation error:`, err);
       setCuts(prev => prev.map(c => c.id === cutId ? { ...c, isGenerating: false, errorMessage: err instanceof Error ? err.message : '生成失敗' } : c));
+    }
+  };
+
+  // 動画設定から動画プロンプトを生成
+  const generateVideoPromptFromSettings = (cut: CutItem): string => {
+    const parts: string[] = [];
+
+    // 動きの種類
+    if (cut.motionType) {
+      parts.push(`Motion: ${cut.motionType}`);
+    }
+
+    // カメラの動き
+    if (cut.cameraMovement) {
+      parts.push(`Camera movement: ${cut.cameraMovement}`);
+    }
+
+    // 動きの強度
+    if (cut.motionIntensity) {
+      const intensityMap: Record<string, string> = {
+        '弱': 'subtle, gentle movement',
+        '中': 'moderate movement',
+        '強': 'dynamic, strong movement'
+      };
+      parts.push(intensityMap[cut.motionIntensity] || cut.motionIntensity);
+    }
+
+    // 開始・終了フレーム
+    if (cut.startFrame && cut.endFrame) {
+      parts.push(`Starting from: ${cut.startFrame}, ending at: ${cut.endFrame}`);
+    } else if (cut.startFrame) {
+      parts.push(`Starting from: ${cut.startFrame}`);
+    } else if (cut.endFrame) {
+      parts.push(`Ending at: ${cut.endFrame}`);
+    }
+
+    // 画面位置
+    if (cut.walkPosition) {
+      parts.push(`Position: ${cut.walkPosition}`);
+    }
+
+    // 基本プロンプト
+    if (cut.prompt) {
+      parts.push(cut.prompt);
+    }
+
+    // 追加の動画プロンプト
+    if (cut.videoPrompt) {
+      parts.push(cut.videoPrompt);
+    }
+
+    // スタイル
+    parts.push('Cinematic fashion video, smooth motion, professional lighting');
+
+    return parts.join('. ');
+  };
+
+  // カット単体の動画を生成
+  const generateVideoForCut = async (cutId: number) => {
+    const targetCut = cuts.find(c => c.id === cutId);
+    if (!targetCut) return;
+
+    // 画像が生成されていない場合はエラー
+    if (!targetCut.generatedImageUrl) {
+      alert('先に画像を生成してください。動画は画像から生成されます。');
+      return;
+    }
+
+    setCuts(prev => prev.map(c => c.id === cutId ? { ...c, isGeneratingVideo: true, errorMessage: undefined } : c));
+
+    try {
+      // 動画プロンプトを生成
+      const videoPrompt = generateVideoPromptFromSettings(targetCut);
+
+      // 動画プロンプトをカットに保存
+      setCuts(prev => prev.map(c => c.id === cutId ? { ...c, videoPrompt } : c));
+
+      // 尺を取得（デフォルト5秒）
+      const durationMap: Record<string, '5' | '10'> = {
+        '2秒': '5',
+        '3秒': '5',
+        '5秒': '5',
+      };
+      const duration = durationMap[targetCut.duration || '5秒'] || '5';
+
+      const result = await generateKlingVideo({
+        imageUrl: targetCut.generatedImageUrl,
+        prompt: videoPrompt,
+        duration,
+        aspectRatio: '9:16',
+        model: 'v2.6-pro',
+      });
+
+      setCuts(prev => prev.map(c => c.id === cutId ? {
+        ...c,
+        isGeneratingVideo: false,
+        generatedVideoUrl: result.videoUrl,
+        videoPrompt,
+      } : c));
+
+    } catch (err) {
+      console.error(`Cut ${cutId} video generation error:`, err);
+      setCuts(prev => prev.map(c => c.id === cutId ? { ...c, isGeneratingVideo: false, errorMessage: err instanceof Error ? err.message : '動画生成失敗' } : c));
     }
   };
 
@@ -2736,51 +2839,92 @@ JSON配列形式で出力してください。`
                     }`}
                   >
                     <div className="flex items-center gap-2 p-3">
-                      {/* Image Thumbnail & Status */}
-                      <div className="relative w-11 h-[78px] rounded-md shrink-0 border border-[#E0E0E0] dark:border-white/10 shadow-sm overflow-hidden group bg-[#F5F5F5] dark:bg-white/5 flex items-center justify-center">
-                        {cut.generatedImageUrl ? (
-                          <img
-                            src={cut.generatedImageUrl}
-                            alt="cut"
-                            className="w-full h-full object-cover cursor-pointer"
-                            onClick={() => setLightboxImage({ url: cut.generatedImageUrl!, title: cut.title })}
-                          />
-                        ) : (
-                          <ImageIcon size={14} className="text-[#B0BEC5] dark:text-gray-500 opacity-50" />
-                        )}
-                        
-                        {cut.isGenerating && (
-                          <div className="absolute inset-0 bg-black/50 flex flex-col justify-center items-center">
-                            <Loader2 size={10} className="text-white animate-spin" />
-                          </div>
-                        )}
+                      {/* Thumbnails: Video (left) + Image (right) */}
+                      <div className="flex gap-1 shrink-0">
+                        {/* Video Thumbnail */}
+                        <div className="relative w-11 h-[78px] rounded-md border border-purple-300 dark:border-purple-500/30 shadow-sm overflow-hidden group bg-purple-50 dark:bg-purple-500/5 flex items-center justify-center">
+                          {cut.generatedVideoUrl ? (
+                            <video
+                              src={cut.generatedVideoUrl}
+                              className="w-full h-full object-cover cursor-pointer"
+                              muted
+                              loop
+                              playsInline
+                              onMouseEnter={(e) => e.currentTarget.play()}
+                              onMouseLeave={(e) => { e.currentTarget.pause(); e.currentTarget.currentTime = 0; }}
+                            />
+                          ) : (
+                            <Video size={14} className="text-purple-300 dark:text-purple-500/50 opacity-50" />
+                          )}
 
-                        {/* Overlay Controls */}
-                        {!cut.isGenerating && (
-                          <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                            {cut.generatedImageUrl && (
+                          {cut.isGeneratingVideo && (
+                            <div className="absolute inset-0 bg-purple-900/70 flex flex-col justify-center items-center">
+                              <Loader2 size={10} className="text-white animate-spin" />
+                              <span className="text-[6px] text-white mt-0.5">動画生成中</span>
+                            </div>
+                          )}
+
+                          {/* Video badge */}
+                          {cut.generatedVideoUrl && (
+                            <div className="absolute top-0.5 left-0.5 bg-purple-500 text-white text-[6px] px-1 py-0.5 rounded font-bold">
+                              🎬
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Image Thumbnail */}
+                        <div className="relative w-11 h-[78px] rounded-md border border-[#E0E0E0] dark:border-white/10 shadow-sm overflow-hidden group bg-[#F5F5F5] dark:bg-white/5 flex items-center justify-center">
+                          {cut.generatedImageUrl ? (
+                            <img
+                              src={cut.generatedImageUrl}
+                              alt="cut"
+                              className="w-full h-full object-cover cursor-pointer"
+                              onClick={() => setLightboxImage({ url: cut.generatedImageUrl!, title: cut.title })}
+                            />
+                          ) : (
+                            <ImageIcon size={14} className="text-[#B0BEC5] dark:text-gray-500 opacity-50" />
+                          )}
+
+                          {cut.isGenerating && (
+                            <div className="absolute inset-0 bg-black/50 flex flex-col justify-center items-center">
+                              <Loader2 size={10} className="text-white animate-spin" />
+                            </div>
+                          )}
+
+                          {/* Overlay Controls */}
+                          {!cut.isGenerating && (
+                            <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                              {cut.generatedImageUrl && (
+                                <button
+                                  onClick={() => setLightboxImage({ url: cut.generatedImageUrl!, title: cut.title })}
+                                  className="text-white hover:text-green-400 p-1.5 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+                                  title="拡大表示"
+                                >
+                                  <Maximize2 size={12} />
+                                </button>
+                              )}
+                              <label className="text-white hover:text-cyan-400 p-1.5 rounded-full bg-white/10 hover:bg-white/20 cursor-pointer transition-colors" title="画像を差し替える (アップロード)">
+                                <Upload size={12} />
+                                <input type="file" accept="image/*" onChange={(e) => { if(e.target.files?.[0]) handleUploadCutImage(cut.id, e.target.files[0]); }} className="hidden" />
+                              </label>
                               <button
-                                onClick={() => setLightboxImage({ url: cut.generatedImageUrl!, title: cut.title })}
-                                className="text-white hover:text-green-400 p-1.5 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
-                                title="拡大表示"
+                                onClick={() => generateImageForCut(cut.id)}
+                                className="text-white hover:text-purple-400 p-1.5 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+                                title="画像を再生成する (AI)"
+                                disabled={!humanFile}
                               >
-                                <Maximize2 size={12} />
+                                <RotateCcw size={12} />
                               </button>
-                            )}
-                            <label className="text-white hover:text-cyan-400 p-1.5 rounded-full bg-white/10 hover:bg-white/20 cursor-pointer transition-colors" title="画像を差し替える (アップロード)">
-                              <Upload size={12} />
-                              <input type="file" accept="image/*" onChange={(e) => { if(e.target.files?.[0]) handleUploadCutImage(cut.id, e.target.files[0]); }} className="hidden" />
-                            </label>
-                            <button
-                              onClick={() => generateImageForCut(cut.id)}
-                              className="text-white hover:text-purple-400 p-1.5 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
-                              title="画像を再生成する (AI)"
-                              disabled={!humanFile}
-                            >
-                              <RotateCcw size={12} />
-                            </button>
-                          </div>
-                        )}
+                            </div>
+                          )}
+
+                          {/* Image badge */}
+                          {cut.generatedImageUrl && (
+                            <div className="absolute top-0.5 left-0.5 bg-cyan-500 text-white text-[6px] px-1 py-0.5 rounded font-bold">
+                              📷
+                            </div>
+                          )}
+                        </div>
                       </div>
 
                       {/* Cut number */}
@@ -3096,6 +3240,42 @@ JSON配列形式で出力してください。`
                                   placeholder="動画生成用の詳細な動き指示..."
                                   className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1.5 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50 resize-y min-h-[40px]"
                                 />
+                              </div>
+                              {/* 動画生成ボタン */}
+                              <div className="col-span-2 pt-3 border-t border-purple-200 dark:border-purple-500/20 mt-2">
+                                <button
+                                  onClick={() => generateVideoForCut(cut.id)}
+                                  disabled={cut.isGeneratingVideo || !cut.generatedImageUrl}
+                                  className={`w-full py-2.5 rounded-lg font-bold text-xs flex justify-center items-center gap-2 transition-all duration-300 ${
+                                    cut.isGeneratingVideo
+                                      ? 'bg-purple-400 text-white cursor-wait'
+                                      : !cut.generatedImageUrl
+                                      ? 'bg-gray-200 dark:bg-white/5 text-[#9E9E9E] dark:text-gray-500 cursor-not-allowed'
+                                      : 'bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-md shadow-purple-500/20 hover:shadow-purple-500/40 hover:scale-[1.02]'
+                                  }`}
+                                >
+                                  {cut.isGeneratingVideo ? (
+                                    <>
+                                      <Loader2 size={14} className="animate-spin" />
+                                      動画生成中...（数分かかります）
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Video size={14} />
+                                      🎬 動画を生成する
+                                    </>
+                                  )}
+                                </button>
+                                {!cut.generatedImageUrl && (
+                                  <p className="text-[9px] text-orange-500 dark:text-orange-400 mt-1.5 text-center">
+                                    ⚠️ 先に「画像用」モードで画像を生成してください
+                                  </p>
+                                )}
+                                {cut.generatedVideoUrl && (
+                                  <p className="text-[9px] text-green-500 dark:text-green-400 mt-1.5 text-center">
+                                    ✅ 動画が生成されています（左のサムネイルにマウスを乗せて再生）
+                                  </p>
+                                )}
                               </div>
                             </div>
                           </div>

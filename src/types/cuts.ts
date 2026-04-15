@@ -18,6 +18,9 @@ export interface CutItem {
   errorMessage?: string;
   backgroundImageUrl?: string; // シーン背景画像
   isGeneratingBackground?: boolean;
+  // 動画生成
+  generatedVideoUrl?: string;  // 生成された動画URL
+  isGeneratingVideo?: boolean; // 動画生成中フラグ
   // 詳細フィールド（構成表編集用 - 画像用）
   expression?: string;        // 表情
   gaze?: string;              // 視線
