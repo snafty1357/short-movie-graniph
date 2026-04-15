@@ -2478,14 +2478,23 @@ JSON配列形式で出力してください。`
 
                         {/* Overlay Controls */}
                         {!cut.isGenerating && (
-                          <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                            {cut.generatedImageUrl && (
+                              <button
+                                onClick={() => setLightboxImage({ url: cut.generatedImageUrl!, title: cut.title })}
+                                className="text-white hover:text-green-400 p-1.5 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+                                title="拡大表示"
+                              >
+                                <Maximize2 size={12} />
+                              </button>
+                            )}
                             <label className="text-white hover:text-cyan-400 p-1.5 rounded-full bg-white/10 hover:bg-white/20 cursor-pointer transition-colors" title="画像を差し替える (アップロード)">
                               <Upload size={12} />
                               <input type="file" accept="image/*" onChange={(e) => { if(e.target.files?.[0]) handleUploadCutImage(cut.id, e.target.files[0]); }} className="hidden" />
                             </label>
-                            <button 
-                              onClick={() => generateImageForCut(cut.id)} 
-                              className="text-white hover:text-purple-400 p-1.5 rounded-full bg-white/10 hover:bg-white/20 transition-colors" 
+                            <button
+                              onClick={() => generateImageForCut(cut.id)}
+                              className="text-white hover:text-purple-400 p-1.5 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
                               title="画像を再生成する (AI)"
                               disabled={!humanFile}
                             >
