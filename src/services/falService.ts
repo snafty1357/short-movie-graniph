@@ -34,7 +34,19 @@ interface TryOnResult {
  * Fal.ai にリクエストを送信 (パス指定)
  * @param useSync true の場合は fal.run を使用（同期モード）
  */
-async function falRequest(path: string, method: string = 'GET', body?: any, useSync: boolean = false): Promise<any> {
+interface FalResponse {
+  images?: Array<{ url: string }>;
+  image?: { url: string };
+  video?: { url: string };
+  thumbnail?: { url: string };
+  status?: string;
+  error?: string;
+  request_id?: string;
+  status_url?: string;
+  response_url?: string;
+}
+
+async function falRequest(path: string, method: string = 'GET', body?: Record<string, unknown>, useSync: boolean = false): Promise<FalResponse> {
   const params = new URLSearchParams({ path });
   if (useSync) {
     params.set('sync', '1');
@@ -59,7 +71,7 @@ async function falRequest(path: string, method: string = 'GET', body?: any, useS
 /**
  * フルURLを使用してFal.ai にリクエストを送信
  */
-async function falRequestUrl(fullUrl: string, method: string = 'GET'): Promise<any> {
+async function falRequestUrl(fullUrl: string, method: string = 'GET'): Promise<FalResponse> {
   const params = new URLSearchParams({ url: fullUrl });
   const url = `${PROXY_BASE}?${params.toString()}`;
   const options: RequestInit = {
@@ -78,7 +90,7 @@ async function falRequestUrl(fullUrl: string, method: string = 'GET'): Promise<a
 /**
  * ステータスをポーリング (status_url と response_url を使用)
  */
-async function pollWithUrls(statusUrl: string, responseUrl: string): Promise<any> {
+async function pollWithUrls(statusUrl: string, responseUrl: string): Promise<FalResponse> {
   const maxAttempts = 240; // 最大8分（2秒×240回）
 
   for (let i = 0; i < maxAttempts; i++) {
@@ -98,9 +110,9 @@ async function pollWithUrls(statusUrl: string, responseUrl: string): Promise<any
       }
 
       // IN_QUEUE, IN_PROGRESS の場合は継続
-    } catch (e: any) {
-      if (e.message.includes('Generation failed')) throw e;
-      console.warn(`[Fal.ai] Poll error (attempt ${i + 1}):`, e.message);
+    } catch (e) {
+      if (e instanceof Error && e.message.includes('Generation failed')) throw e;
+      console.warn(`[Fal.ai] Poll error (attempt ${i + 1}):`, e instanceof Error ? e.message : e);
       // 一時的なエラーの場合は継続
     }
   }

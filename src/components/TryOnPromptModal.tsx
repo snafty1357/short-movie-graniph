@@ -54,6 +54,7 @@ const TryOnPromptModal: React.FC<TryOnPromptModalProps> = ({
         handleLoadQuestions();
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, initialPrompt]);
 
   // モーダルが閉じたときにリセット

@@ -119,7 +119,8 @@ const PromptModal: React.FC<PromptModalProps> = ({
     if (!isOpen) {
       setAnalysis(null);
     }
-  }, [isOpen, previewUrl]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, previewUrl, onAnalyze]);
 
   const handleAnalyze = async () => {
     if (!onAnalyze) return;

@@ -3,9 +3,13 @@ import { generatePose, fileToDataUrl, generateKlingVideo, type KlingModel, type 
 import { downloadVideoFromUrl, downloadAllVideos } from '../services/videoExportService';
 import { Play, Pause, Download, X, Video, Loader2, Check } from 'lucide-react';
 import type { ResultItem } from './ResultGallery';
-import { generateProjectId } from './ResultGallery';
+import { generateProjectId } from '../utils/projectUtils';
 import { getDeviceId } from '../services/historyService';
 import { supabase } from '../services/supabaseClient';
+// Re-export types for backward compatibility
+export type { CutItem } from '../types/cuts';
+export { DEFAULT_CUTS } from '../types/cuts';
+import type { CutItem } from '../types/cuts';
 
 interface ShortVideoModalProps {
   isOpen: boolean;
@@ -23,43 +27,6 @@ interface ShortVideoModalProps {
   setCuts: React.Dispatch<React.SetStateAction<CutItem[]>>;
   onGenerateSuccess: (results: ResultItem[]) => void;
 }
-
-export interface CutItem {
-  id: number;
-  title: string;
-  prompt: string;
-  semanticPrompt?: string;
-  camera?: string;
-  enabled: boolean;
-  showMain: boolean;
-  showSub: boolean;
-  ipPrompt?: string; // IP（サブキャラ）の状態・行動プロンプト
-  generatedImageUrl?: string;
-  isGenerating?: boolean;
-  errorMessage?: string;
-  backgroundImageUrl?: string; // シーン背景画像
-  isGeneratingBackground?: boolean;
-  // 詳細フィールド（構成表編集用）
-  expression?: string;        // 表情
-  gaze?: string;              // 視線
-  pose?: string;              // ポーズ
-  walkingStyle?: string;      // 歩き方
-  walkPosition?: string;      // 歩行位置（画面内）
-  moveDistance?: string;      // 移動距離
-  action?: string;            // アクション（中心事象）
-  background?: string;        // 背景要素
-  productEmphasis?: string;   // プロダクト強調部位
-}
-
-export const DEFAULT_CUTS: CutItem[] = [
-  { id: 1, title: '正面全身', prompt: 'standing perfectly still, completely front-facing full body shot, fashion catalog style, symmetrical pose', semanticPrompt: '状況把握', enabled: true, showMain: true, showSub: false },
-  { id: 2, title: '歩きのポーズ', prompt: 'walking confidently towards the camera, fashion runway style, natural stride', semanticPrompt: '重さ提示', enabled: true, showMain: true, showSub: false },
-  { id: 3, title: '振り返り', prompt: 'looking over the shoulder towards the camera, dynamic fashion angle', semanticPrompt: '重さの深化', enabled: true, showMain: true, showSub: false },
-  { id: 4, title: '上半身アップ', prompt: 'close-up shot on the upper half of the body, highlighting the garment texture, material and details', semanticPrompt: 'ズレ発生', enabled: true, showMain: true, showSub: false },
-  { id: 5, title: '座りポーズ', prompt: 'sitting elegantly on a minimalistic chair, relaxed fashion look', semanticPrompt: '軽さ提示', enabled: true, showMain: true, showSub: false },
-  { id: 6, title: 'アクションポーズ', prompt: 'dynamic fashion pose, arms crossed or hands in pockets, strong confident look', semanticPrompt: '解放', enabled: true, showMain: true, showSub: false },
-  { id: 7, title: '背面全身', prompt: 'standing back facing the camera, showing the back of the garment, fashion catalog style', semanticPrompt: '余韻', enabled: true, showMain: true, showSub: false },
-];
 
 const ShortVideoModal: React.FC<ShortVideoModalProps> = ({
   isOpen,
@@ -241,7 +208,7 @@ const ShortVideoModal: React.FC<ShortVideoModalProps> = ({
             company_slug: null,
           }).then(({ error }) => { if (error) console.error(error); });
 
-        } catch (err: any) {
+        } catch (err) {
           console.error(`Cut ${i + 1} Error:`, err);
         }
         setProgress(prev => ({ ...prev, completed: i + 1 }));
@@ -252,9 +219,9 @@ const ShortVideoModal: React.FC<ShortVideoModalProps> = ({
       } else {
         onGenerateSuccess(newResults);
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setError(err.message || '予期せぬエラーが発生しました');
+      setError(err instanceof Error ? err.message : '予期せぬエラーが発生しました');
     } finally {
       setIsGenerating(false);
     }
@@ -295,9 +262,9 @@ const ShortVideoModal: React.FC<ShortVideoModalProps> = ({
 
         videos.push(result.videoUrl);
         setGeneratedVideos([...videos]);
-      } catch (err: any) {
+      } catch (err) {
         console.error(`Video ${i + 1} Error:`, err);
-        setError(`動画 ${i + 1} の生成に失敗: ${err.message}`);
+        setError(`動画 ${i + 1} の生成に失敗: ${err instanceof Error ? err.message : '不明なエラー'}`);
       }
 
       setVideoProgress({ current: i + 1, total: generatedImages.length });
@@ -334,8 +301,8 @@ const ShortVideoModal: React.FC<ShortVideoModalProps> = ({
       const filename = `graniph_${timestamp}_cut${index + 1}_${cut.title}.mp4`;
       await downloadVideoFromUrl(generatedVideos[index], filename);
       setDownloadedIndices(prev => new Set([...prev, index]));
-    } catch (err: any) {
-      setError(`ダウンロード失敗: ${err.message}`);
+    } catch (err) {
+      setError(`ダウンロード失敗: ${err instanceof Error ? err.message : '不明なエラー'}`);
     } finally {
       setDownloadingIndex(null);
     }
@@ -358,8 +325,8 @@ const ShortVideoModal: React.FC<ShortVideoModalProps> = ({
         }
       );
       setDownloadedIndices(new Set(generatedVideos.map((_, i) => i)));
-    } catch (err: any) {
-      setError(`一括ダウンロード失敗: ${err.message}`);
+    } catch (err) {
+      setError(`一括ダウンロード失敗: ${err instanceof Error ? err.message : '不明なエラー'}`);
     } finally {
       setIsDownloadingAll(false);
       setDownloadingIndex(null);
@@ -416,7 +383,7 @@ const ShortVideoModal: React.FC<ShortVideoModalProps> = ({
                     <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-black/60 backdrop-blur-md px-4 py-2 rounded-full border border-white/20">
                       <span className="text-xs text-white">動画 {currentVideoIndex + 1}/{generatedVideos.length}</span>
                       <div className="flex gap-1">
-                        {generatedVideos.map((_: any, idx: number) => (
+                        {generatedVideos.map((_, idx) => (
                           <button
                             key={idx}
                             onClick={() => setCurrentVideoIndex(idx)}
@@ -445,7 +412,7 @@ const ShortVideoModal: React.FC<ShortVideoModalProps> = ({
                         {isPlaying ? <Pause size={18} /> : <Play size={18} />}
                       </button>
                       <div className="flex gap-1">
-                        {generatedImages.map((_: any, idx: number) => (
+                        {generatedImages.map((_, idx) => (
                           <div
                             key={idx}
                             className={`w-1.5 h-1.5 rounded-full transition-all ${

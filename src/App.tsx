@@ -1,12 +1,16 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
 import ImageUploader from './components/ImageUploader';
 import ResultGallery, { type ResultItem } from './components/ResultGallery';
-import ShortVideoModal, { type CutItem } from './components/ShortVideoModal';
+import { type CutItem } from './types/cuts';
 import { useAuth } from './contexts/AuthContext';
 import { useTheme } from './contexts/ThemeContext';
 import AuthForm from './components/AuthForm';
-import StoryPdfUploader from './components/StoryPdfUploader';
-import StoryboardWorkflowModal from './components/StoryboardWorkflowModal';
+import { SUB_CHAR_PRESETS, DETAIL_PRESETS, type CustomInstructionBlock } from './hooks/useCharacterSettings';
+
+// 動的インポートでバンドルサイズを削減
+const ShortVideoModal = lazy(() => import('./components/ShortVideoModal'));
+const StoryPdfUploader = lazy(() => import('./components/StoryPdfUploader'));
+const StoryboardWorkflowModal = lazy(() => import('./components/StoryboardWorkflowModal'));
 
 import { User, Users, Sun, Moon, UserCircle, RotateCcw, RefreshCw, Pencil, ChevronDown, Sparkles, Image as ImageIcon, Loader2, Upload, Play, BookOpen, History, Save, Trash2, FolderOpen, Maximize2, X, Plus, Search, Download } from 'lucide-react';
 import { generatePose, fileToDataUrl } from './services/falService';
@@ -28,29 +32,12 @@ const App: React.FC = () => {
   const [subCharFile, setSubCharFile] = useState<File | null>(null);
   const [subCharPreview, setSubCharPreview] = useState<string | null>(null);
 
-  // サブキャラクタープロンプト設定
-  const SUB_CHAR_PRESETS = [
-    { id: 'expressionless', label: '無表情固定', prompt: 'always expressionless, blank face, no emotion' },
-    { id: 'no_fingers', label: '手に指はない', prompt: 'hands without fingers, mitten-like hands, no individual fingers' },
-    { id: 'no_protagonist', label: '主役化禁止', prompt: 'always in background, never the main subject, supporting role only' },
-    { id: 'invisible', label: '人物からは見えない', prompt: 'invisible to other characters, unnoticed presence, ghost-like existence' },
-    { id: 'physical', label: '物理干渉可能', prompt: 'can interact with physical objects, touching and moving things' },
-    { id: 'size_20cm', label: 'サイズ20cm', prompt: 'tiny character approximately 20cm tall, miniature figure scale' },
-  ] as const;
-
-
-
+  // サブキャラクタープロンプト設定（SUB_CHAR_PRESETSはhooksからインポート）
   const [activeSubTags, setActiveSubTags] = useState<Set<string>>(new Set(SUB_CHAR_PRESETS.map(p => p.id)));
   const [customSubPrompt, setCustomSubPrompt] = useState('');
   const [mainCharPrompt, setMainCharPrompt] = useState('');
 
-  // カスタム指示ブロック（メインキャラ用）
-  interface CustomInstructionBlock {
-    id: string;
-    label: string;
-    prompt: string;
-    active: boolean;
-  }
+  // カスタム指示ブロック（CustomInstructionBlockはhooksからインポート）
   const [mainCustomInstructions, setMainCustomInstructions] = useState<CustomInstructionBlock[]>([]);
   const [subCustomInstructions, setSubCustomInstructions] = useState<CustomInstructionBlock[]>([]);
   const [newMainInstruction, setNewMainInstruction] = useState({ label: '', prompt: '' });
@@ -355,9 +342,9 @@ IP情報: ${cut.ipPrompt || 'なし'}
       if (newPrompt) {
         setCuts(prev => prev.map(c => c.id === cutId ? { ...c, prompt: newPrompt.trim() } : c));
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error('Cut prompt regeneration error:', err);
-      alert('プロンプト再生成に失敗しました: ' + err.message);
+      alert('プロンプト再生成に失敗しました: ' + (err instanceof Error ? err.message : '不明なエラー'));
     } finally {
       setRegeneratingCutId(null);
     }
@@ -425,9 +412,9 @@ Requirements:
       if (newPrompt) {
         setCuts(prev => prev.map(c => c.id === cutId ? { ...c, prompt: newPrompt.trim() } : c));
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error('Field translation error:', err);
-      alert('英語化に失敗しました: ' + err.message);
+      alert('英語化に失敗しました: ' + (err instanceof Error ? err.message : '不明なエラー'));
     } finally {
       setRegeneratingCutId(null);
     }
@@ -457,9 +444,9 @@ Requirements:
         selectedModelId
       );
       setStagePrompt(generated);
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      alert('要素固定シートの生成に失敗しました: ' + err.message);
+      alert('要素固定シートの生成に失敗しました: ' + (err instanceof Error ? err.message : '不明なエラー'));
     } finally {
       setIsGeneratingFixed(false);
     }
@@ -562,10 +549,10 @@ Requirements:
         console.error('[Background] Full response:', JSON.stringify(falData));
         throw new Error('No image URL returned');
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error('Background generation error:', err);
       setCuts(prev => prev.map(c => c.id === cutId ? { ...c, isGeneratingBackground: false } : c));
-      alert('背景画像の生成に失敗しました: ' + err.message);
+      alert('背景画像の生成に失敗しました: ' + (err instanceof Error ? err.message : '不明なエラー'));
     }
   };
 
@@ -757,7 +744,7 @@ JSON配列形式で出力してください。`
 
               // 最新のcuts stateに対してプロンプトだけ更新（他の変更を上書きしない）
               setCuts(prev => prev.map(cut => {
-                const regenerated = regeneratedPrompts.find((r: any) => r.id === cut.id);
+                const regenerated = regeneratedPrompts.find((r: { id: number; prompt?: string }) => r.id === cut.id);
                 if (regenerated && regenerated.prompt) {
                   return { ...cut, prompt: regenerated.prompt };
                 }
@@ -770,7 +757,7 @@ JSON配列形式で出力してください。`
           console.error('[AutoGenerate/BG] バックグラウンド英語化エラー（UI影響なし）:', bgErr);
         }
       })();
-    } catch (err: any) {
+    } catch (err) {
       console.error('[AutoGenerate] Error:', err);
       throw err;
     }
@@ -828,9 +815,9 @@ JSON配列形式で出力してください。`
         generatedImageUrl: result.imageUrl 
       } : c));
 
-    } catch (err: any) {
+    } catch (err) {
       console.error(`Cut ${cutId} generation error:`, err);
-      setCuts(prev => prev.map(c => c.id === cutId ? { ...c, isGenerating: false, errorMessage: err.message || '生成失敗' } : c));
+      setCuts(prev => prev.map(c => c.id === cutId ? { ...c, isGenerating: false, errorMessage: err instanceof Error ? err.message : '生成失敗' } : c));
     }
   };
 
@@ -901,14 +888,15 @@ JSON配列形式で出力してください。`
           } : c));
 
           return { id: cut.id, success: true };
-        } catch (err: any) {
+        } catch (err) {
+          const errMessage = err instanceof Error ? err.message : '生成失敗';
           console.error(`Cut ${cut.id} generation error:`, err);
           setCuts(prev => prev.map(c => c.id === cut.id ? {
             ...c,
             isGenerating: false,
-            errorMessage: err.message || '生成失敗'
+            errorMessage: errMessage
           } : c));
-          return { id: cut.id, success: false, error: err.message };
+          return { id: cut.id, success: false, error: errMessage };
         }
       });
 
@@ -917,9 +905,9 @@ JSON配列形式で出力してください。`
       const successCount = results.filter(r => r.success).length;
       console.log(`[ImageGeneration] Completed: ${successCount}/${enabledCutsToGenerate.length} images generated`);
 
-    } catch (err: any) {
+    } catch (err) {
       console.error('Batch generation error:', err);
-      setError(err.message || '画像生成中にエラーが発生しました');
+      setError(err instanceof Error ? err.message : '画像生成中にエラーが発生しました');
     } finally {
       setIsGenerating(false);
     }
@@ -931,20 +919,12 @@ JSON配列形式で出力してください。`
   const [pendingRegenerate, setPendingRegenerate] = useState(false);
   const charPanelRef = useRef<HTMLDivElement>(null);
 
-  // キャラクター詳細ブロック
+  // キャラクター詳細ブロック（DETAIL_PRESETSはhooksからインポート）
   interface CharacterDetailBlock {
     id: string;
     label: string;
     value: string;
   }
-  const DETAIL_PRESETS = [
-    { label: '服装', placeholder: '例: 白いTシャツ、デニムジーンズ、スニーカー' },
-    { label: '髪型', placeholder: '例: 黒髪ロング、ポニーテール' },
-    { label: '表情', placeholder: '例: 笑顔、真剣な表情、驚いた顔' },
-    { label: 'アクセサリー', placeholder: '例: メガネ、帽子、ネックレス' },
-    { label: '体型', placeholder: '例: スリム、筋肉質、小柄' },
-    { label: 'ポーズ', placeholder: '例: 腕を組む、手を振る、歩く' },
-  ];
   const [mainCharDetails, setMainCharDetails] = useState<CharacterDetailBlock[]>([]);
   const [subCharDetails, setSubCharDetails] = useState<CharacterDetailBlock[]>([]);
   const [customFieldInput, setCustomFieldInput] = useState('');
@@ -2296,26 +2276,28 @@ JSON配列形式で出力してください。`
               <div className="lg:col-span-7 xl:col-span-8 flex flex-col gap-6">
 
               {/* Story PDF → Auto Cut Composition */}
-              <StoryPdfUploader
-                aiModel={aiModel}
-                selectedModelId={selectedModelId}
-                onAiModelChange={(model) => {
-                  setAiModel(model);
-                  localStorage.setItem('snafty_ai_model', model);
-                }}
-                onStoryExtracted={(text) => setExtractedPdfText(text)}
-                onCutsGenerated={(newCuts) => {
-                  setCuts(newCuts);
-                  setEditingCutId(null);
-                }}
-                characterFile={humanFile}
-                characterConfirmed={characterConfirmed}
-                onRequestCharacter={() => {
-                  // キャラクター設定パネルを開く
-                  setCharPanelOpen(true);
-                }}
-                onFullAutoGenerate={handleFullAutoGenerate}
-              />
+              <Suspense fallback={<div className="glass rounded-2xl p-8 text-center"><Loader2 className="animate-spin mx-auto mb-2" size={24} /><p className="text-sm text-gray-500">読み込み中...</p></div>}>
+                <StoryPdfUploader
+                  aiModel={aiModel}
+                  selectedModelId={selectedModelId}
+                  onAiModelChange={(model) => {
+                    setAiModel(model);
+                    localStorage.setItem('snafty_ai_model', model);
+                  }}
+                  onStoryExtracted={(text) => setExtractedPdfText(text)}
+                  onCutsGenerated={(newCuts) => {
+                    setCuts(newCuts);
+                    setEditingCutId(null);
+                  }}
+                  characterFile={humanFile}
+                  characterConfirmed={characterConfirmed}
+                  onRequestCharacter={() => {
+                    // キャラクター設定パネルを開く
+                    setCharPanelOpen(true);
+                  }}
+                  onFullAutoGenerate={handleFullAutoGenerate}
+                />
+              </Suspense>
 
             {/* Composition Plan Settings */}
             <div className="glass rounded-2xl p-4">
@@ -3250,32 +3232,36 @@ JSON配列形式で出力してください。`
       )}
 
       {/* Short Video Modal */}
-      <ShortVideoModal
-        isOpen={videoModalOpen}
-        onClose={() => setVideoModalOpen(false)}
-        humanFile={humanFile}
-        subCharacterFile={subCharFile}
-        subCharPrompt={subCharPrompt}
-        mainCharPrompt={mainCharPrompt}
-        stillImageStyle={stillImageStyle}
-        stillImageNegative={stillImageNegative}
-        semanticPrompt={semanticPrompt}
-        productPrompt={productPrompt}
-        stagePrompt={stagePrompt}
-        cuts={cuts}
-        setCuts={setCuts}
-        onGenerateSuccess={(newResults) => {
-          setResults(prev => [...newResults, ...prev]);
-        }}
-      />
+      <Suspense fallback={null}>
+        <ShortVideoModal
+          isOpen={videoModalOpen}
+          onClose={() => setVideoModalOpen(false)}
+          humanFile={humanFile}
+          subCharacterFile={subCharFile}
+          subCharPrompt={subCharPrompt}
+          mainCharPrompt={mainCharPrompt}
+          stillImageStyle={stillImageStyle}
+          stillImageNegative={stillImageNegative}
+          semanticPrompt={semanticPrompt}
+          productPrompt={productPrompt}
+          stagePrompt={stagePrompt}
+          cuts={cuts}
+          setCuts={setCuts}
+          onGenerateSuccess={(newResults) => {
+            setResults(prev => [...newResults, ...prev]);
+          }}
+        />
+      </Suspense>
 
       {/* Storyboard Workflow Modal */}
-      <StoryboardWorkflowModal
-        isOpen={storyboardModalOpen}
-        onClose={() => setStoryboardModalOpen(false)}
-        aiModel={aiModel}
-        existingCharacterFile={humanFile}
-      />
+      <Suspense fallback={null}>
+        <StoryboardWorkflowModal
+          isOpen={storyboardModalOpen}
+          onClose={() => setStoryboardModalOpen(false)}
+          aiModel={aiModel}
+          existingCharacterFile={humanFile}
+        />
+      </Suspense>
 
       {/* Image Lightbox Modal */}
       {lightboxImage && (

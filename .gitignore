@@ -11,9 +11,15 @@ node_modules
 dist
 dist-ssr
 *.local
+
+# Environment variables - すべての環境変数ファイルを無視（.env.exampleは除く）
 .env
 .env.local
 .env.production
+.env.prod
+.env.vercel
+.env.development
+.env*.local
 
 # Editor directories and files
 .vscode/*

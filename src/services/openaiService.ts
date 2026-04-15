@@ -24,9 +24,21 @@ export interface Question {
   garmentLabel?: string;
 }
 
+interface ImageUrlContent {
+  type: 'image_url';
+  image_url: { url: string; detail?: 'low' | 'high' | 'auto' };
+}
+
+interface TextContent {
+  type: 'text';
+  text: string;
+}
+
+type MessageContent = string | (TextContent | ImageUrlContent)[];
+
 export interface ConversationMessage {
   role: 'system' | 'user' | 'assistant';
-  content: string | any[];
+  content: MessageContent;
 }
 
 /**

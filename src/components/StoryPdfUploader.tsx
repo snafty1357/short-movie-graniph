@@ -87,7 +87,8 @@ const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
       }
     };
     runAutoGenerate();
-  }, [characterConfirmed]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [characterConfirmed, characterFile, pendingText]);
 
   const saveSettings = () => {
     localStorage.setItem('snafty_regulation', regulation);
@@ -135,9 +136,9 @@ const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
         // フォールバック：従来の生成処理
         handleGenerate(text);
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error('PDF extraction error:', err);
-      setError(err.message || 'PDFの読み込みに失敗しました');
+      setError(err instanceof Error ? err.message : 'PDFの読み込みに失敗しました');
       setStep('error');
     }
 
@@ -163,9 +164,9 @@ const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
       setGeneratedCuts(result.cuts);
       setRawAiResponse(result.rawAiResponse);
       setStep('done');
-    } catch (err: any) {
+    } catch (err) {
       console.error('Cut generation error:', err);
-      setError(err.message || 'カット割り生成に失敗しました');
+      setError(err instanceof Error ? err.message : 'カット割り生成に失敗しました');
       setStep('error');
     }
   };
@@ -185,9 +186,9 @@ const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
       setExtractedText('');
       setGeneratedCuts([]);
       setRawAiResponse('');
-    } catch (err: any) {
+    } catch (err) {
       console.error('Apply cuts error:', err);
-      alert('適用時にエラーが発生しました: ' + err.message);
+      alert('適用時にエラーが発生しました: ' + (err instanceof Error ? err.message : '不明なエラー'));
     }
   };
 
@@ -200,6 +201,7 @@ const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
     }
 
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let arr: any[] = [];
       let jsonStr = jsonInput.trim();
 
@@ -258,7 +260,7 @@ const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
       }
 
       // CutCompositionRow に変換
-      const cuts: CutCompositionRow[] = arr.map((item: any, i: number) => ({
+      const cuts: CutCompositionRow[] = arr.map((item, i) => ({
         cutNumber: item.cutNumber ?? i + 1,
         duration: item.duration || '2秒',
         role: item.role || '',
@@ -286,11 +288,11 @@ const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
       setRawAiResponse(jsonInput);
       setStep('done');
       setJsonInput('');
-    } catch (err: any) {
+    } catch (err) {
       console.error('JSON parse error:', err);
       // デバッグ用：入力の先頭50文字を表示
       const preview = jsonInput.trim().substring(0, 80);
-      setJsonError(`JSONパースエラー: ${err.message}\n\n入力プレビュー: ${preview}`);
+      setJsonError(`JSONパースエラー: ${err instanceof Error ? err.message : '不明なエラー'}\n\n入力プレビュー: ${preview}`);
     }
   };
 
