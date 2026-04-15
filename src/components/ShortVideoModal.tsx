@@ -37,6 +37,18 @@ export interface CutItem {
   generatedImageUrl?: string;
   isGenerating?: boolean;
   errorMessage?: string;
+  backgroundImageUrl?: string; // シーン背景画像
+  isGeneratingBackground?: boolean;
+  // 詳細フィールド（構成表編集用）
+  expression?: string;        // 表情
+  gaze?: string;              // 視線
+  pose?: string;              // ポーズ
+  walkingStyle?: string;      // 歩き方
+  walkPosition?: string;      // 歩行位置（画面内）
+  moveDistance?: string;      // 移動距離
+  action?: string;            // アクション（中心事象）
+  background?: string;        // 背景要素
+  productEmphasis?: string;   // プロダクト強調部位
 }
 
 export const DEFAULT_CUTS: CutItem[] = [

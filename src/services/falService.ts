@@ -240,6 +240,8 @@ export interface PoseGenerationRequest {
   pose: string;
   resolution?: Resolution;
   format?: ImageFormat;
+  subCharacterImageUrl?: string; // IPキャラクター画像（オプション）
+  subCharacterPrompt?: string;   // IPキャラクターの説明
 }
 
 /**
@@ -254,13 +256,25 @@ export async function generatePose(request: PoseGenerationRequest): Promise<TryO
     2048: '2K',
     4096: '4K',
   };
-  
+
   const size = request.resolution ? RESOLUTION_MAP[request.resolution] : 1024;
-  const prompt = `Change the posture of the person in the image to strike exactly a ${request.pose} pose. Strictly preserve their face identity, features, and their current clothing exactly as it is.`;
+
+  // プロンプトを構築（IPキャラクターがある場合は追加）
+  let prompt = `Change the posture of the person in the image to strike exactly a ${request.pose} pose. Strictly preserve their face identity, features, and their current clothing exactly as it is.`;
+
+  if (request.subCharacterImageUrl && request.subCharacterPrompt) {
+    prompt += ` Also include a companion character in the scene: ${request.subCharacterPrompt}. Place the companion character naturally within the composition.`;
+  }
+
+  // 画像配列を構築
+  const imageUrls = [request.humanImageUrl];
+  if (request.subCharacterImageUrl) {
+    imageUrls.push(request.subCharacterImageUrl);
+  }
 
   const submitResult = await falRequest('fal-ai/nano-banana-2/edit', 'POST', {
     prompt: prompt,
-    image_urls: [request.humanImageUrl], // 単一の画像
+    image_urls: imageUrls,
     resolution: resolutionMap[size] || '1K',
     num_images: 1,
     safety_tolerance: "5",
@@ -296,7 +310,7 @@ export async function generatePose(request: PoseGenerationRequest): Promise<TryO
 // Kling Video Generation
 // =====================
 
-export type KlingModel = 'v1-standard' | 'v1-pro' | 'v2-master' | 'v2.1-pro';
+export type KlingModel = 'v1-standard' | 'v1-pro' | 'v2-master' | 'v2.1-pro' | 'v2.6-pro';
 export type KlingDuration = '5' | '10';
 export type KlingAspectRatio = '16:9' | '9:16' | '1:1';
 
@@ -319,13 +333,14 @@ const KLING_MODEL_PATHS: Record<KlingModel, string> = {
   'v1-pro': 'fal-ai/kling-video/v1/pro/image-to-video',
   'v2-master': 'fal-ai/kling-video/v2/master/image-to-video',
   'v2.1-pro': 'fal-ai/kling-video/v2.1/pro/image-to-video',
+  'v2.6-pro': 'fal-ai/kling-video/v2.6/pro/image-to-video',
 };
 
 /**
  * Kling 動画生成 (Image to Video)
  */
 export async function generateKlingVideo(request: KlingVideoRequest): Promise<KlingVideoResult> {
-  const model = request.model || 'v2-master';
+  const model = request.model || 'v2.6-pro';
   const path = KLING_MODEL_PATHS[model];
 
   console.log(`[Kling] Starting video generation with ${model}...`);

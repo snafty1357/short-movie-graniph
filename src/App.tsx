@@ -8,9 +8,11 @@ import AuthForm from './components/AuthForm';
 import StoryPdfUploader from './components/StoryPdfUploader';
 import StoryboardWorkflowModal from './components/StoryboardWorkflowModal';
 
-import { User, Users, Sun, Moon, UserCircle, RotateCcw, Pencil, ChevronDown, Sparkles, Image as ImageIcon, Loader2, Upload, Play, BookOpen } from 'lucide-react';
+import { User, Users, Sun, Moon, UserCircle, RotateCcw, RefreshCw, Pencil, ChevronDown, Sparkles, Image as ImageIcon, Loader2, Upload, Play, BookOpen, History, Save, Trash2, FolderOpen, Maximize2, X, Plus, Search, Download } from 'lucide-react';
 import { generatePose, fileToDataUrl } from './services/falService';
 import { generateFixedElements, generateCutComposition, compositionRowToCutItem, DEFAULT_FIXED_META_PROMPT, DEFAULT_REGULATION, DEFAULT_META_PROMPT, type AiModelType } from './services/storyPdfService';
+import { getEnabledAiModels, getSelectedModelId, setSelectedModelId, getProviderFromModelId, type AiModelVersion } from './services/aiModelConfig';
+import { getProjectHistory, saveToProjectHistory, removeFromProjectHistory, generateProjectName, DEFAULT_BUDGET, type ProjectHistoryEntry, type ProjectBudget, type GenerationTimes } from './services/projectHistoryService';
 
 
 
@@ -42,11 +44,116 @@ const App: React.FC = () => {
   const [customSubPrompt, setCustomSubPrompt] = useState('');
   const [mainCharPrompt, setMainCharPrompt] = useState('');
 
-  // サブキャラ用プロンプト生成
+  // カスタム指示ブロック（メインキャラ用）
+  interface CustomInstructionBlock {
+    id: string;
+    label: string;
+    prompt: string;
+    active: boolean;
+  }
+  const [mainCustomInstructions, setMainCustomInstructions] = useState<CustomInstructionBlock[]>([]);
+  const [subCustomInstructions, setSubCustomInstructions] = useState<CustomInstructionBlock[]>([]);
+  const [newMainInstruction, setNewMainInstruction] = useState({ label: '', prompt: '' });
+  const [newSubInstruction, setNewSubInstruction] = useState({ label: '', prompt: '' });
+  const [showMainInstructionInput, setShowMainInstructionInput] = useState(false);
+  const [showSubInstructionInput, setShowSubInstructionInput] = useState(false);
+
+  // カスタム指示を追加
+  const addCustomInstruction = (isMain: boolean) => {
+    const input = isMain ? newMainInstruction : newSubInstruction;
+    if (!input.label.trim()) return;
+
+    const newBlock: CustomInstructionBlock = {
+      id: `custom-${Date.now()}`,
+      label: input.label.trim(),
+      prompt: input.prompt.trim() || input.label.trim(), // プロンプト未入力ならラベルを使用
+      active: true,
+    };
+
+    if (isMain) {
+      setMainCustomInstructions(prev => [...prev, newBlock]);
+      setNewMainInstruction({ label: '', prompt: '' });
+      setShowMainInstructionInput(false);
+    } else {
+      setSubCustomInstructions(prev => [...prev, newBlock]);
+      setNewSubInstruction({ label: '', prompt: '' });
+      setShowSubInstructionInput(false);
+    }
+  };
+
+  // カスタム指示のON/OFF切り替え
+  const toggleCustomInstruction = (isMain: boolean, id: string) => {
+    if (isMain) {
+      setMainCustomInstructions(prev => prev.map(i => i.id === id ? { ...i, active: !i.active } : i));
+    } else {
+      setSubCustomInstructions(prev => prev.map(i => i.id === id ? { ...i, active: !i.active } : i));
+    }
+  };
+
+  // カスタム指示を削除
+  const removeCustomInstruction = (isMain: boolean, id: string) => {
+    if (isMain) {
+      setMainCustomInstructions(prev => prev.filter(i => i.id !== id));
+    } else {
+      setSubCustomInstructions(prev => prev.filter(i => i.id !== id));
+    }
+  };
+
+  // ─── カスタム指示プリセット保存・読み込み ───
+  interface InstructionPreset {
+    name: string;
+    mainInstructions: CustomInstructionBlock[];
+    subInstructions: CustomInstructionBlock[];
+    savedAt: string;
+  }
+  const [instructionPresets, setInstructionPresets] = useState<InstructionPreset[]>(() => {
+    try {
+      const saved = localStorage.getItem('snafty_instruction_presets');
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+  const [showPresetInput, setShowPresetInput] = useState(false);
+  const [presetName, setPresetName] = useState('');
+
+  const saveInstructionPreset = () => {
+    if (!presetName.trim()) return;
+    const preset: InstructionPreset = {
+      name: presetName.trim(),
+      mainInstructions: mainCustomInstructions.map(i => ({ ...i })),
+      subInstructions: subCustomInstructions.map(i => ({ ...i })),
+      savedAt: new Date().toISOString(),
+    };
+    const updated = [...instructionPresets, preset];
+    setInstructionPresets(updated);
+    localStorage.setItem('snafty_instruction_presets', JSON.stringify(updated));
+    setPresetName('');
+    setShowPresetInput(false);
+  };
+
+  const loadInstructionPreset = (preset: InstructionPreset) => {
+    setMainCustomInstructions(preset.mainInstructions.map(i => ({
+      ...i, id: `custom-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+    })));
+    setSubCustomInstructions(preset.subInstructions.map(i => ({
+      ...i, id: `custom-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+    })));
+  };
+
+  const deleteInstructionPreset = (index: number) => {
+    const updated = instructionPresets.filter((_, i) => i !== index);
+    setInstructionPresets(updated);
+    localStorage.setItem('snafty_instruction_presets', JSON.stringify(updated));
+  };
+
+  // サブキャラ用プロンプト生成（カスタム指示を含む）
   const subCharPrompt = [
     ...SUB_CHAR_PRESETS.filter(p => activeSubTags.has(p.id)).map(p => p.prompt),
+    ...subCustomInstructions.filter(i => i.active).map(i => i.prompt),
     ...(customSubPrompt.trim() ? [customSubPrompt.trim()] : []),
   ].join(', ');
+
+  // メインキャラ用カスタム指示プロンプト
+  const mainCustomPrompt = mainCustomInstructions.filter(i => i.active).map(i => i.prompt).join(', ');
 
   // UI状態
   const [isGenerating, setIsGenerating] = useState(false);
@@ -71,10 +178,27 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('snafty_ai_model');
     return (saved as AiModelType) || 'openai';
   });
-  
+
+  // 詳細AIモデル選択
+  const [selectedModelId, setSelectedModelIdState] = useState<string>(() => getSelectedModelId());
+  const [availableAiModels] = useState<AiModelVersion[]>(() => getEnabledAiModels());
+
+  // モデルIDを変更時にlocalStorageにも保存
+  const handleModelIdChange = (modelId: string) => {
+    setSelectedModelIdState(modelId);
+    setSelectedModelId(modelId);
+    const provider = getProviderFromModelId(modelId);
+    setAiModel(provider);
+    localStorage.setItem('snafty_ai_model', provider);
+    // コストも更新
+    const model = availableAiModels.find(m => m.id === modelId);
+    if (model) {
+      setProjectBudget(prev => ({ ...prev, aiCostPerCall: model.costPerCall }));
+    }
+  };
+
   const [stillPromptPanelOpen, setStillPromptPanelOpen] = useState(false);
   const stillPromptPanelRef = useRef<HTMLDivElement>(null);
-  const [stillMetaPanelOpen, setStillMetaPanelOpen] = useState(false);
   const [semanticPanelOpen, setSemanticPanelOpen] = useState(false);
   const semanticPanelRef = useRef<HTMLDivElement>(null);
   const [productPanelOpen, setProductPanelOpen] = useState(false);
@@ -83,14 +207,42 @@ const App: React.FC = () => {
   const fixedPanelRef = useRef<HTMLDivElement>(null);
 
   // Video Generation Settings
-  const [videoGenModel, setVideoGenModel] = useState<string>('luma');
+  const [videoGenModel, setVideoGenModel] = useState<string>('kling');
   const [videoPromptStyle, setVideoPromptStyle] = useState('masterpiece, 8k resolution, highly detailed, smooth motion, high fps');
   const [videoPromptNegative, setVideoPromptNegative] = useState('');
-  const [videoMetaPrompt, setVideoMetaPrompt] = useState('動画ジェネレーターに渡すモーション指示やスタイルのベースルールを入力してください。');
-  const [videoPromptPanelOpen, setVideoPromptPanelOpen] = useState(false);
-  const [videoMetaPanelOpen, setVideoMetaPanelOpen] = useState(false);
+  const [videoMetaPrompt, setVideoMetaPrompt] = useState('動画生成AIに渡すモーション指示のルールを設定します。');
 
   const enabledCuts = cuts.filter(c => c.enabled);
+
+  // ─── API稼働状況チェック ───
+  type ApiStatus = 'checking' | 'ok' | 'error';
+  const [apiStatuses, setApiStatuses] = useState<Record<string, ApiStatus>>({
+    openai: 'checking',
+    gemini: 'checking',
+    claude: 'checking',
+  });
+
+  useEffect(() => {
+    const checkApi = async (provider: string, model: string) => {
+      try {
+        const res = await fetch(`/api/${provider}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model,
+            messages: [{ role: 'user', content: 'ping' }],
+            max_tokens: 5,
+          }),
+        });
+        setApiStatuses(prev => ({ ...prev, [provider]: res.ok ? 'ok' : 'error' }));
+      } catch {
+        setApiStatuses(prev => ({ ...prev, [provider]: 'error' }));
+      }
+    };
+    checkApi('openai', 'gpt-4o-mini');
+    checkApi('gemini', 'gemini-2.0-flash');
+    checkApi('claude', 'claude-3-5-haiku-20241022');
+  }, []);
 
   useEffect(() => {
     const savedFixedMeta = localStorage.getItem('snafty_fixed_meta_prompt');
@@ -110,19 +262,20 @@ const App: React.FC = () => {
     const vidStyle = localStorage.getItem('snafty_video_style');
     const vidNeg = localStorage.getItem('snafty_video_negative');
     const vidMeta = localStorage.getItem('snafty_video_meta_prompt');
-    
+
     if (stStyle !== null) setStillImageStyle(stStyle);
+    if (vidMeta !== null) setVideoMetaPrompt(vidMeta);
     if (stNeg !== null) setStillImageNegative(stNeg);
     if (stMeta !== null) setStillImageMetaPrompt(stMeta);
     if (vidModel !== null) setVideoGenModel(vidModel);
     if (vidStyle !== null) setVideoPromptStyle(vidStyle);
     if (vidNeg !== null) setVideoPromptNegative(vidNeg);
-    if (vidMeta !== null) setVideoMetaPrompt(vidMeta);
   }, []);
 
   const saveStillPrompts = () => {
     localStorage.setItem('snafty_still_style', stillImageStyle);
     localStorage.setItem('snafty_still_negative', stillImageNegative);
+    localStorage.setItem('snafty_still_meta_prompt', stillImageMetaPrompt);
     alert('静止画プロンプト設定を保存しました。');
   };
 
@@ -130,17 +283,8 @@ const App: React.FC = () => {
     localStorage.setItem('snafty_video_model', videoGenModel);
     localStorage.setItem('snafty_video_style', videoPromptStyle);
     localStorage.setItem('snafty_video_negative', videoPromptNegative);
-    alert('動画生成プロンプト設定を保存しました。');
-  };
-
-  const saveVideoMetaPrompt = () => {
     localStorage.setItem('snafty_video_meta_prompt', videoMetaPrompt);
-    alert('動画生用のプロンプト指示（メタ）を保存しました。');
-  };
-
-  const saveStillMetaPrompt = () => {
-    localStorage.setItem('snafty_still_meta_prompt', stillImageMetaPrompt);
-    alert('静止画用のプロンプト指示（メタ）を保存しました。');
+    alert('動画生成プロンプト設定を保存しました。');
   };
 
   const toggleCut = (id: number) => {
@@ -149,7 +293,7 @@ const App: React.FC = () => {
 
 
 
-  const updateCutField = (id: number, field: 'title' | 'prompt' | 'camera' | 'semanticPrompt', value: string) => {
+  const updateCutField = (id: number, field: 'title' | 'prompt' | 'camera' | 'semanticPrompt' | 'expression' | 'gaze' | 'pose' | 'walkingStyle' | 'walkPosition' | 'moveDistance' | 'action' | 'background' | 'productEmphasis', value: string) => {
     setCuts(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c));
   };
 
@@ -158,7 +302,136 @@ const App: React.FC = () => {
     setEditingCutId(null);
   };
 
+  // カット単体のプロンプト再生成
+  const [regeneratingCutId, setRegeneratingCutId] = useState<number | null>(null);
 
+  const regenerateCutPrompt = async (cutId: number) => {
+    const cut = cuts.find(c => c.id === cutId);
+    if (!cut || !extractedPdfText) return;
+
+    setRegeneratingCutId(cutId);
+    try {
+      const aiEndpoint = `/api/${aiModel}`;
+      const aiModelName = aiModel === 'openai' ? 'gpt-4o' : aiModel === 'gemini' ? 'gemini-2.5-flash' : 'claude-sonnet-4-20250514';
+
+      const response = await fetch(aiEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: aiModelName,
+          messages: [
+            {
+              role: 'system',
+              content: `You are an expert in image generation prompts. Regenerate this cut's prompt into a high-quality English prompt for AI image generation.
+
+Create a detailed English prompt that includes:
+- Character pose and expression based on the camera angle
+- Camera angle and composition
+- Action/movement description
+- Background elements
+- Lighting and atmosphere
+
+Output ONLY the English prompt text, no JSON or formatting.`
+            },
+            {
+              role: 'user',
+              content: `タイトル: ${cut.title}
+カメラ: ${cut.camera || 'なし'}
+現在のプロンプト: ${cut.prompt}
+IP情報: ${cut.ipPrompt || 'なし'}
+要素固定（背景）: ${stagePrompt}
+
+このカットのプロンプトを、カメラ設定（${cut.camera || '指定なし'}）を考慮して、画像生成AIに最適な英語プロンプトに再生成してください。`
+            }
+          ],
+          max_tokens: 500
+        })
+      });
+
+      if (!response.ok) throw new Error('API error');
+      const data = await response.json();
+      const newPrompt = data.choices?.[0]?.message?.content || data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+      if (newPrompt) {
+        setCuts(prev => prev.map(c => c.id === cutId ? { ...c, prompt: newPrompt.trim() } : c));
+      }
+    } catch (err: any) {
+      console.error('Cut prompt regeneration error:', err);
+      alert('プロンプト再生成に失敗しました: ' + err.message);
+    } finally {
+      setRegeneratingCutId(null);
+    }
+  };
+
+  // 詳細フィールドから英語プロンプトを生成（翻訳モード）
+  const regenerateCutPromptFromFields = async (cutId: number) => {
+    const cut = cuts.find(c => c.id === cutId);
+    if (!cut) return;
+
+    // 詳細フィールドを収集
+    const fields = [
+      cut.expression && `表情: ${cut.expression}`,
+      cut.gaze && `視線: ${cut.gaze}`,
+      cut.pose && `ポーズ: ${cut.pose}`,
+      cut.walkingStyle && `歩き方: ${cut.walkingStyle}`,
+      cut.walkPosition && `画面位置: ${cut.walkPosition}`,
+      cut.moveDistance && `移動距離: ${cut.moveDistance}`,
+      cut.action && `アクション: ${cut.action}`,
+      cut.background && `背景: ${cut.background}`,
+      cut.productEmphasis && `プロダクト強調: ${cut.productEmphasis}`,
+      cut.camera && `カメラ: ${cut.camera}`,
+    ].filter(Boolean).join('\n');
+
+    if (!fields) {
+      alert('詳細設定が入力されていません');
+      return;
+    }
+
+    setRegeneratingCutId(cutId);
+    try {
+      const aiEndpoint = `/api/${aiModel}`;
+      const aiModelName = aiModel === 'openai' ? 'gpt-4o' : aiModel === 'gemini' ? 'gemini-2.5-flash' : 'claude-sonnet-4-20250514';
+
+      const response = await fetch(aiEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: aiModelName,
+          messages: [
+            {
+              role: 'system',
+              content: `You are an expert translator and prompt engineer for AI image generation.
+Convert the given Japanese scene description fields into a high-quality English prompt for AI image generation.
+
+Requirements:
+- Translate each field accurately to English
+- Combine them into a single coherent prompt
+- Use natural English phrasing suitable for image generation
+- Output ONLY the English prompt, no explanations or formatting`
+            },
+            {
+              role: 'user',
+              content: `以下の日本語の詳細設定を、AI画像生成に最適な英語プロンプトに変換してください:\n\n${fields}`
+            }
+          ],
+          max_tokens: 500
+        })
+      });
+
+      if (!response.ok) throw new Error('API error');
+      const data = await response.json();
+      const newPrompt = data.choices?.[0]?.message?.content || data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+      if (newPrompt) {
+        setCuts(prev => prev.map(c => c.id === cutId ? { ...c, prompt: newPrompt.trim() } : c));
+      }
+    } catch (err: any) {
+      console.error('Field translation error:', err);
+      alert('英語化に失敗しました: ' + err.message);
+    } finally {
+      setRegeneratingCutId(null);
+    }
+  };
 
   const handleUploadCutImage = (cutId: number, file: File) => {
     const url = URL.createObjectURL(file);
@@ -181,7 +454,7 @@ const App: React.FC = () => {
         reg,
         cutMeta,
         fixedElementMetaPrompt,
-        aiModel
+        selectedModelId
       );
       setStagePrompt(generated);
     } catch (err: any) {
@@ -192,18 +465,171 @@ const App: React.FC = () => {
     }
   };
 
+  // シーン背景画像の生成
+  const generateBackgroundForCut = async (cutId: number) => {
+    const cut = cuts.find(c => c.id === cutId);
+    if (!cut || !stagePrompt) return;
+
+    setCuts(prev => prev.map(c => c.id === cutId ? { ...c, isGeneratingBackground: true } : c));
+
+    try {
+      // AIで背景プロンプトを生成
+      const aiEndpoint = `/api/${aiModel}`;
+      const aiModelName = aiModel === 'openai' ? 'gpt-4o' : aiModel === 'gemini' ? 'gemini-2.5-flash' : 'claude-sonnet-4-20250514';
+
+      const promptResponse = await fetch(aiEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: aiModelName,
+          messages: [
+            {
+              role: 'system',
+              content: `You are an expert at creating background image prompts for AI image generation. Create a detailed English prompt for generating a background scene WITHOUT any people or characters.`
+            },
+            {
+              role: 'user',
+              content: `シーン: ${cut.title}
+カメラ: ${cut.camera || 'ミディアムショット'}
+背景設定: ${stagePrompt}
+シーンプロンプト: ${cut.prompt}
+
+このシーンの背景のみ（人物なし）を生成するプロンプトを英語で出力してください。建物、風景、インテリアなど背景要素のみを詳細に記述してください。Output ONLY the English prompt.`
+            }
+          ],
+          max_tokens: 300
+        })
+      });
+
+      if (!promptResponse.ok) throw new Error('AI prompt generation failed');
+      const promptData = await promptResponse.json();
+      const bgPrompt = promptData.choices?.[0]?.message?.content || promptData.candidates?.[0]?.content?.parts?.[0]?.text || stagePrompt;
+
+      // fal.aiで背景画像を生成（プロキシ経由）
+      const finalPrompt = `${bgPrompt}, no people, no characters, empty scene, high quality background, cinematic lighting, 8k resolution`;
+      const falParams = new URLSearchParams({ path: 'fal-ai/flux/dev' });
+      const falResponse = await fetch(`/api/proxy?${falParams.toString()}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: finalPrompt,
+          image_size: 'landscape_16_9',
+          num_images: 1,
+          enable_safety_checker: false
+        })
+      });
+
+      if (!falResponse.ok) {
+        const errData = await falResponse.json().catch(() => ({}));
+        throw new Error(errData.detail || errData.error || 'Background image generation failed');
+      }
+      let falData = await falResponse.json();
+      console.log('[Background] Initial response:', JSON.stringify(falData).substring(0, 500));
+
+      // 非同期処理の場合はポーリング
+      if (falData.status_url && falData.response_url) {
+        const maxAttempts = 60;
+        for (let i = 0; i < maxAttempts; i++) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          const statusParams = new URLSearchParams({ url: falData.status_url });
+          const statusRes = await fetch(`/api/proxy?${statusParams.toString()}`);
+          const statusData = await statusRes.json();
+          console.log(`[Background] Poll ${i + 1}: ${statusData.status}`);
+
+          if (statusData.status === 'COMPLETED') {
+            const responseParams = new URLSearchParams({ url: falData.response_url });
+            const resultRes = await fetch(`/api/proxy?${responseParams.toString()}`);
+            falData = await resultRes.json();
+            break;
+          }
+          if (statusData.status === 'FAILED') {
+            throw new Error('Background generation failed');
+          }
+        }
+      }
+
+      // 様々なレスポンス形式に対応
+      const imageUrl = falData.images?.[0]?.url
+        || falData.output?.images?.[0]?.url
+        || falData.image?.url
+        || (typeof falData.images?.[0] === 'string' ? falData.images[0] : null);
+
+      console.log('[Background] Final imageUrl:', imageUrl);
+
+      if (imageUrl) {
+        setCuts(prev => prev.map(c => c.id === cutId ? { ...c, backgroundImageUrl: imageUrl, isGeneratingBackground: false } : c));
+      } else {
+        console.error('[Background] Full response:', JSON.stringify(falData));
+        throw new Error('No image URL returned');
+      }
+    } catch (err: any) {
+      console.error('Background generation error:', err);
+      setCuts(prev => prev.map(c => c.id === cutId ? { ...c, isGeneratingBackground: false } : c));
+      alert('背景画像の生成に失敗しました: ' + err.message);
+    }
+  };
+
+  // 全シーンの背景を一括生成
+  const generateAllBackgrounds = async () => {
+    const enabledCutsForBg = cuts.filter(c => c.enabled);
+    for (const cut of enabledCutsForBg) {
+      await generateBackgroundForCut(cut.id);
+    }
+  };
+
+  // 背景画像のダウンロード
+  const downloadBackgroundImage = async (imageUrl: string, cutTitle: string) => {
+    try {
+      const response = await fetch(imageUrl);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const timestamp = new Date().toISOString().slice(0, 10);
+      a.download = `background_${timestamp}_${cutTitle.replace(/[^a-zA-Z0-9\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/g, '_')}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Download error:', err);
+      alert('ダウンロードに失敗しました');
+    }
+  };
+
+  // 全背景画像を一括ダウンロード
+  const downloadAllBackgrounds = async () => {
+    const enabledCutsWithBg = cuts.filter(c => c.enabled && c.backgroundImageUrl);
+    for (const cut of enabledCutsWithBg) {
+      if (cut.backgroundImageUrl) {
+        await downloadBackgroundImage(cut.backgroundImageUrl, cut.title);
+        await new Promise(resolve => setTimeout(resolve, 500)); // 少し間隔を空ける
+      }
+    }
+  };
+
   // ─── PDF自動生成フロー ───
   const handleFullAutoGenerate = async (pdfText: string) => {
+    const totalStartTime = Date.now();
     try {
       const reg = localStorage.getItem('snafty_regulation') || DEFAULT_REGULATION;
       const cutMeta = localStorage.getItem('snafty_meta_prompt') || DEFAULT_META_PROMPT;
 
-      // Step 1: AIカット割り生成
-      console.log('[AutoGenerate] Step 1: AIカット割り生成中...');
-      console.log('[AutoGenerate] Using AI model:', aiModel);
-      console.log('[AutoGenerate] Calling generateCutComposition...');
-      const cutResult = await generateCutComposition(pdfText, reg, cutMeta, 7, aiModel);
-      console.log('[AutoGenerate] Cut generation completed!');
+      // Step 1 + Step 2: カット割り生成と要素固定を並列実行
+      console.log('[AutoGenerate] Step 1+2: カット割り生成 & 要素固定を並列実行中...');
+      console.log('[AutoGenerate] Using AI model:', selectedModelId);
+      setIsGeneratingFixed(true);
+      const parallelStartTime = Date.now();
+
+      const [cutResult, generatedFixed] = await Promise.all([
+        generateCutComposition(pdfText, reg, cutMeta, 7, selectedModelId),
+        generateFixedElements(pdfText, reg, cutMeta, fixedElementMetaPrompt, selectedModelId),
+      ]);
+
+      const parallelEndTime = Date.now();
+      const cutCompositionTime = parallelEndTime - parallelStartTime;
+      const fixedElementsTime = cutCompositionTime; // 並列なので同じ
+      console.log(`[AutoGenerate] Step 1+2 並列完了! (${cutCompositionTime}ms)`);
 
       // デバッグログ: AIからの生データを確認
       console.log('[AutoGenerate] AI Response cuts:', cutResult.cuts);
@@ -221,45 +647,72 @@ const App: React.FC = () => {
 
       setCuts(newCuts);
       setEditingCutId(null);
-
-      // Step 2: 要素固定プロンプト生成
-      console.log('[AutoGenerate] Step 2: 要素固定プロンプト生成中...');
-      setIsGeneratingFixed(true);
-      const generatedFixed = await generateFixedElements(
-        pdfText,
-        reg,
-        cutMeta,
-        fixedElementMetaPrompt,
-        aiModel
-      );
       setStagePrompt(generatedFixed);
       setIsGeneratingFixed(false);
       console.log('[AutoGenerate] Generated fixed elements:', generatedFixed);
 
-      // Step 3: 各カットのプロンプトを英語で再生成
-      console.log('[AutoGenerate] Step 3: 各カットのプロンプトを英語で再生成中...');
+      // 生成時間を記録
+      const totalTime = Date.now() - totalStartTime;
+      setGenerationTimes({
+        cutComposition: cutCompositionTime,
+        fixedElements: fixedElementsTime,
+        totalTime: totalTime,
+      });
 
-      const cutPromptsToRegenerate = newCuts.map(c => ({
+      // スタイルプロンプトも設定（要素固定プロンプトをベースに）
+      setStillImageStyle(`masterpiece, 8k resolution, highly detailed, ${generatedFixed}`);
+
+      // 自動保存（Step 1+2 完了時点で即座に保存）
+      const finalTotalTime = Date.now() - totalStartTime;
+      const timesForSave = {
+        cutComposition: cutCompositionTime,
+        fixedElements: fixedElementsTime,
+        totalTime: finalTotalTime,
+      };
+      const name = generateProjectName(newCuts, pdfText);
+      const entry = saveToProjectHistory({
+        name,
+        cuts: newCuts,
+        stagePrompt: generatedFixed,
+        extractedPdfText: pdfText,
+        mainCharPrompt,
+        subCharPrompt,
+        aiModel,
+        budget: projectBudget,
+        generationTimes: timesForSave,
+      });
+      setCurrentProjectId(entry.id);
+      setProjectHistory(getProjectHistory());
+      console.log('[AutoGenerate] 自動保存完了:', entry.name);
+      console.log('[AutoGenerate] Step 1+2 完了！UI反映済み');
+
+      // Step 3: 各カットのプロンプトを英語で再生成（バックグラウンド）
+      // UIブロックせず非同期で実行し、完了次第カットを更新する
+      const bgAiEndpoint = `/api/${aiModel}`;
+      const bgAiModelName = aiModel === 'openai' ? 'gpt-4o' : aiModel === 'gemini' ? 'gemini-2.5-flash' : 'claude-sonnet-4-20250514';
+      const bgCutPrompts = newCuts.map(c => ({
         id: c.id,
         title: c.title,
         originalPrompt: c.prompt,
         camera: c.camera,
         ipPrompt: c.ipPrompt
       }));
+      const bgGeneratedFixed = generatedFixed;
+      const bgStillImageMetaPrompt = stillImageMetaPrompt;
 
-      // 選択されたAIモデルに応じてエンドポイントとモデル名を決定
-      const aiEndpoint = `/api/${aiModel}`;
-      const aiModelName = aiModel === 'openai' ? 'gpt-4o' : aiModel === 'gemini' ? 'gemini-2.5-flash' : 'claude-sonnet-4-20250514';
-
-      const regenerateResponse = await fetch(aiEndpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: aiModelName,
-          messages: [
-            {
-              role: 'system',
-              content: `You are an expert in image generation prompts. Regenerate each cut's prompt into high-quality English prompts for AI image generation.
+      // fire-and-forget: awaitしない
+      (async () => {
+        try {
+          console.log('[AutoGenerate/BG] Step 3: 英語プロンプト再生成をバックグラウンドで開始...');
+          const regenerateResponse = await fetch(bgAiEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: bgAiModelName,
+              messages: [
+                {
+                  role: 'system',
+                  content: `You are an expert in image generation prompts. Regenerate each cut's prompt into high-quality English prompts for AI image generation.
 
 For each cut, create a detailed English prompt that includes:
 - Character pose and expression
@@ -270,61 +723,53 @@ For each cut, create a detailed English prompt that includes:
 - Any IP character actions if present
 
 Output as JSON array with format: [{"id": number, "prompt": "english prompt here"}, ...]`
-            },
-            {
-              role: 'user',
-              content: `静止画メタプロンプト（スタイル指示）:
-${stillImageMetaPrompt}
+                },
+                {
+                  role: 'user',
+                  content: `静止画メタプロンプト（スタイル指示）:
+${bgStillImageMetaPrompt}
 
 要素固定プロンプト（背景・環境）:
-${generatedFixed}
+${bgGeneratedFixed}
 
 以下の各カットのプロンプトを、画像生成AIに最適な英語プロンプトに変換してください:
 
-${cutPromptsToRegenerate.map(c => `ID: ${c.id}
+${bgCutPrompts.map(c => `ID: ${c.id}
 タイトル: ${c.title}
 カメラ: ${c.camera || 'なし'}
 元プロンプト: ${c.originalPrompt}
 IP情報: ${c.ipPrompt || 'なし'}`).join('\n\n')}
 
 JSON配列形式で出力してください。`
+                }
+              ],
+              max_tokens: 2000
+            })
+          });
+
+          if (regenerateResponse.ok) {
+            const regenerateData = await regenerateResponse.json();
+            const content = regenerateData.choices?.[0]?.message?.content?.trim();
+
+            const jsonMatch = content?.match(/\[[\s\S]*\]/);
+            if (jsonMatch) {
+              const regeneratedPrompts = JSON.parse(jsonMatch[0]);
+
+              // 最新のcuts stateに対してプロンプトだけ更新（他の変更を上書きしない）
+              setCuts(prev => prev.map(cut => {
+                const regenerated = regeneratedPrompts.find((r: any) => r.id === cut.id);
+                if (regenerated && regenerated.prompt) {
+                  return { ...cut, prompt: regenerated.prompt };
+                }
+                return cut;
+              }));
+              console.log('[AutoGenerate/BG] 英語プロンプト再生成完了 ✓');
             }
-          ],
-          max_tokens: 2000
-        })
-      });
-
-      if (regenerateResponse.ok) {
-        const regenerateData = await regenerateResponse.json();
-        const content = regenerateData.choices?.[0]?.message?.content?.trim();
-
-        try {
-          // JSON配列を抽出
-          const jsonMatch = content.match(/\[[\s\S]*\]/);
-          if (jsonMatch) {
-            const regeneratedPrompts = JSON.parse(jsonMatch[0]);
-
-            // カットのプロンプトを更新
-            const updatedCuts = newCuts.map(cut => {
-              const regenerated = regeneratedPrompts.find((r: any) => r.id === cut.id);
-              if (regenerated && regenerated.prompt) {
-                return { ...cut, prompt: regenerated.prompt };
-              }
-              return cut;
-            });
-
-            setCuts(updatedCuts);
-            console.log('[AutoGenerate] Regenerated cut prompts:', updatedCuts.map(c => ({ id: c.id, prompt: c.prompt.substring(0, 50) })));
           }
-        } catch (parseErr) {
-          console.error('[AutoGenerate] Failed to parse regenerated prompts:', parseErr);
+        } catch (bgErr) {
+          console.error('[AutoGenerate/BG] バックグラウンド英語化エラー（UI影響なし）:', bgErr);
         }
-      }
-
-      // スタイルプロンプトも設定（要素固定プロンプトをベースに）
-      setStillImageStyle(`masterpiece, 8k resolution, highly detailed, ${generatedFixed}`);
-
-      console.log('[AutoGenerate] 完了！');
+      })();
     } catch (err: any) {
       console.error('[AutoGenerate] Error:', err);
       throw err;
@@ -344,8 +789,11 @@ JSON配列形式で出力してください。`
     try {
       const humanDataUrl = await fileToDataUrl(humanFile);
       let finalPrompt = targetCut.camera ? `Camera angle: ${targetCut.camera}. ${targetCut.prompt}` : targetCut.prompt;
-      if (mainCharPrompt) {
-        finalPrompt = `${mainCharPrompt}, ${finalPrompt}`;
+      // メインキャラクターのプロンプトと詳細を追加
+      const mainDetailPrompt = getMainCharDetailPrompt();
+      const mainPromptParts = [mainCharPrompt, mainCustomPrompt, mainDetailPrompt].filter(Boolean).join(', ');
+      if (mainPromptParts) {
+        finalPrompt = `${mainPromptParts}, ${finalPrompt}`;
       }
       const combinedBase = [stillImageStyle, stagePrompt].filter(Boolean).join(', ');
       if (combinedBase) {
@@ -354,16 +802,24 @@ JSON配列形式で出力してください。`
       if (stillImageNegative) {
         finalPrompt += ` (negative: ${stillImageNegative})`;
       }
+
+      // サブキャラクター（IP）の設定
+      let subCharDataUrl: string | undefined;
+      let ipDescription: string | undefined;
       if (targetCut.showSub && subCharFile && subCharPrompt) {
-        // IPプロンプトがある場合はそれを使用、なければデフォルトのsubCharPromptを使用
-        const ipDescription = targetCut.ipPrompt || subCharPrompt;
-        finalPrompt += `, with a small companion character: ${subCharPrompt}, ${ipDescription}`;
+        subCharDataUrl = await fileToDataUrl(subCharFile);
+        const subDetailPrompt = getSubCharDetailPrompt();
+        ipDescription = [targetCut.ipPrompt || subCharPrompt, subDetailPrompt].filter(Boolean).join(', ');
+        finalPrompt += `, with a small companion character: ${ipDescription}`;
       }
+
       const result = await generatePose({
         humanImageUrl: humanDataUrl,
         pose: finalPrompt,
         resolution: '1K',
         format: 'jpeg',
+        subCharacterImageUrl: subCharDataUrl,
+        subCharacterPrompt: ipDescription,
       });
       
       setCuts(prev => prev.map(c => c.id === cutId ? { 
@@ -403,14 +859,19 @@ JSON配列形式で出力してください。`
 
     try {
       const humanDataUrl = await fileToDataUrl(humanFile);
+      const subCharDataUrl = subCharFile ? await fileToDataUrl(subCharFile) : null;
       const combinedBase = [stillImageStyle, stagePrompt].filter(Boolean).join(', ');
+      const mainDetailPrompt = getMainCharDetailPrompt();
+      const subDetailPrompt = getSubCharDetailPrompt();
 
       // 全カットを同時に生成
       const generatePromises = enabledCutsToGenerate.map(async (cut) => {
         try {
           let finalPrompt = cut.camera ? `Camera angle: ${cut.camera}. ${cut.prompt}` : cut.prompt;
-          if (mainCharPrompt) {
-            finalPrompt = `${mainCharPrompt}, ${finalPrompt}`;
+          // メインキャラクターのプロンプトと詳細を追加
+          const mainPromptParts = [mainCharPrompt, mainCustomPrompt, mainDetailPrompt].filter(Boolean).join(', ');
+          if (mainPromptParts) {
+            finalPrompt = `${mainPromptParts}, ${finalPrompt}`;
           }
           if (combinedBase) {
             finalPrompt = `${combinedBase}, ${finalPrompt}`;
@@ -418,16 +879,18 @@ JSON配列形式で出力してください。`
           if (stillImageNegative) {
             finalPrompt += ` (negative: ${stillImageNegative})`;
           }
-          if (cut.showSub && subCharFile && subCharPrompt) {
-            const ipDescription = cut.ipPrompt || subCharPrompt;
-            finalPrompt += `, with a small companion character: ${subCharPrompt}, ${ipDescription}`;
-          }
+
+          // IPキャラクターの処理
+          const useSubChar = cut.showSub && subCharDataUrl && subCharPrompt;
+          const ipDescription = [cut.ipPrompt || subCharPrompt || '', subDetailPrompt].filter(Boolean).join(', ');
 
           const result = await generatePose({
             humanImageUrl: humanDataUrl,
             pose: finalPrompt,
             resolution: '1K',
             format: 'jpeg',
+            subCharacterImageUrl: useSubChar ? subCharDataUrl : undefined,
+            subCharacterPrompt: useSubChar ? ipDescription : undefined,
           });
 
           // 成功時に即座に状態を更新
@@ -465,7 +928,158 @@ JSON配列形式で出力してください。`
   // キャラクター設定パネル外側クリック検知状態
   const [charPanelOpen, setCharPanelOpen] = useState(false);
   const [characterConfirmed, setCharacterConfirmed] = useState(false);
+  const [pendingRegenerate, setPendingRegenerate] = useState(false);
   const charPanelRef = useRef<HTMLDivElement>(null);
+
+  // キャラクター詳細ブロック
+  interface CharacterDetailBlock {
+    id: string;
+    label: string;
+    value: string;
+  }
+  const DETAIL_PRESETS = [
+    { label: '服装', placeholder: '例: 白いTシャツ、デニムジーンズ、スニーカー' },
+    { label: '髪型', placeholder: '例: 黒髪ロング、ポニーテール' },
+    { label: '表情', placeholder: '例: 笑顔、真剣な表情、驚いた顔' },
+    { label: 'アクセサリー', placeholder: '例: メガネ、帽子、ネックレス' },
+    { label: '体型', placeholder: '例: スリム、筋肉質、小柄' },
+    { label: 'ポーズ', placeholder: '例: 腕を組む、手を振る、歩く' },
+  ];
+  const [mainCharDetails, setMainCharDetails] = useState<CharacterDetailBlock[]>([]);
+  const [subCharDetails, setSubCharDetails] = useState<CharacterDetailBlock[]>([]);
+  const [customFieldInput, setCustomFieldInput] = useState('');
+  const [customFieldInputSub, setCustomFieldInputSub] = useState('');
+
+  // キャラクタープリセット
+  interface CharacterPreset {
+    id: string;
+    name: string;
+    mainCharPrompt: string;
+    mainCharDetails: CharacterDetailBlock[];
+    subCharDetails: CharacterDetailBlock[];
+    customSubPrompt: string;
+    activeSubTags: string[];
+    mainCustomInstructions?: CustomInstructionBlock[];
+    subCustomInstructions?: CustomInstructionBlock[];
+  }
+  const [characterPresets, setCharacterPresets] = useState<CharacterPreset[]>(() => {
+    const saved = localStorage.getItem('snafty_character_presets');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [presetNameInput, setPresetNameInput] = useState('');
+  const [showPresetSaveModal, setShowPresetSaveModal] = useState(false);
+
+  // プリセット保存
+  const saveCharacterPreset = () => {
+    if (!presetNameInput.trim()) {
+      alert('プリセット名を入力してください');
+      return;
+    }
+    const newPreset: CharacterPreset = {
+      id: `preset-${Date.now()}`,
+      name: presetNameInput.trim(),
+      mainCharPrompt,
+      mainCharDetails: mainCharDetails.map(d => ({ ...d })),
+      subCharDetails: subCharDetails.map(d => ({ ...d })),
+      customSubPrompt,
+      activeSubTags: Array.from(activeSubTags),
+      mainCustomInstructions: mainCustomInstructions.map(i => ({ ...i })),
+      subCustomInstructions: subCustomInstructions.map(i => ({ ...i })),
+    };
+    const updated = [...characterPresets, newPreset];
+    setCharacterPresets(updated);
+    localStorage.setItem('snafty_character_presets', JSON.stringify(updated));
+    setPresetNameInput('');
+    setShowPresetSaveModal(false);
+    alert(`プリセット「${newPreset.name}」を保存しました`);
+  };
+
+  // プリセット読み込み
+  const loadCharacterPreset = (preset: CharacterPreset) => {
+    setMainCharPrompt(preset.mainCharPrompt);
+    setMainCharDetails(preset.mainCharDetails.map(d => ({ ...d, id: `detail-${Date.now()}-${Math.random().toString(36).substr(2, 9)}` })));
+    setSubCharDetails(preset.subCharDetails.map(d => ({ ...d, id: `detail-${Date.now()}-${Math.random().toString(36).substr(2, 9)}` })));
+    setCustomSubPrompt(preset.customSubPrompt);
+    setActiveSubTags(new Set(preset.activeSubTags));
+    // カスタム指示も読み込み
+    if (preset.mainCustomInstructions) {
+      setMainCustomInstructions(preset.mainCustomInstructions.map(i => ({ ...i, id: `custom-${Date.now()}-${Math.random().toString(36).substr(2, 9)}` })));
+    }
+    if (preset.subCustomInstructions) {
+      setSubCustomInstructions(preset.subCustomInstructions.map(i => ({ ...i, id: `custom-${Date.now()}-${Math.random().toString(36).substr(2, 9)}` })));
+    }
+  };
+
+  // プリセット削除
+  const deleteCharacterPreset = (presetId: string) => {
+    const updated = characterPresets.filter(p => p.id !== presetId);
+    setCharacterPresets(updated);
+    localStorage.setItem('snafty_character_presets', JSON.stringify(updated));
+  };
+
+  const addCharacterDetail = (isMain: boolean, label: string) => {
+    const newBlock: CharacterDetailBlock = {
+      id: `detail-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      label,
+      value: '',
+    };
+    if (isMain) {
+      setMainCharDetails(prev => [...prev, newBlock]);
+    } else {
+      setSubCharDetails(prev => [...prev, newBlock]);
+    }
+  };
+
+  const updateCharacterDetail = (isMain: boolean, id: string, value: string) => {
+    if (isMain) {
+      setMainCharDetails(prev => prev.map(d => d.id === id ? { ...d, value } : d));
+    } else {
+      setSubCharDetails(prev => prev.map(d => d.id === id ? { ...d, value } : d));
+    }
+  };
+
+  const removeCharacterDetail = (isMain: boolean, id: string) => {
+    if (isMain) {
+      setMainCharDetails(prev => prev.filter(d => d.id !== id));
+    } else {
+      setSubCharDetails(prev => prev.filter(d => d.id !== id));
+    }
+  };
+
+  // 詳細ブロックからプロンプトを生成（画像生成時に使用）
+  const getMainCharDetailPrompt = (): string => {
+    return mainCharDetails.filter(d => d.value.trim()).map(d => `${d.label}: ${d.value}`).join(', ');
+  };
+  const getSubCharDetailPrompt = (): string => {
+    return subCharDetails.filter(d => d.value.trim()).map(d => `${d.label}: ${d.value}`).join(', ');
+  };
+
+  // 履歴機能
+  const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
+  const [projectHistory, setProjectHistory] = useState<ProjectHistoryEntry[]>([]);
+  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const historyPanelRef = useRef<HTMLDivElement>(null);
+  const [historySearchQuery, setHistorySearchQuery] = useState('');
+
+  // 検索でフィルタリングされた履歴
+  const filteredHistory = historySearchQuery.trim()
+    ? projectHistory.filter(entry =>
+        entry.name.toLowerCase().includes(historySearchQuery.toLowerCase()) ||
+        entry.cuts.some(cut => cut.title.toLowerCase().includes(historySearchQuery.toLowerCase()))
+      )
+    : projectHistory;
+
+  // プロジェクト予算
+  const [projectBudget, setProjectBudget] = useState<ProjectBudget>(DEFAULT_BUDGET);
+
+  // 生成時間の記録
+  const [generationTimes, setGenerationTimes] = useState<GenerationTimes>({});
+
+  // 画像拡大表示用
+  const [lightboxImage, setLightboxImage] = useState<{ url: string; title: string } | null>(null);
+
+  // 生成設定タブ（動画/静止画）
+  const [generationSettingsTab, setGenerationSettingsTab] = useState<'video' | 'still'>('still');
 
   // Click outside to close character panel
   useEffect(() => {
@@ -486,16 +1100,100 @@ JSON配列形式で出力してください。`
       if (fixedPanelRef.current && !fixedPanelRef.current.contains(e.target as Node)) {
         setFixedPanelOpen(false);
       }
+      if (historyPanelRef.current && !historyPanelRef.current.contains(e.target as Node)) {
+        setHistoryPanelOpen(false);
+      }
     };
-    if (charPanelOpen || stillPromptPanelOpen || semanticPanelOpen || productPanelOpen || fixedPanelOpen) {
+    if (charPanelOpen || stillPromptPanelOpen || semanticPanelOpen || productPanelOpen || fixedPanelOpen || historyPanelOpen) {
       document.addEventListener('mousedown', handleClickOutside);
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [charPanelOpen, stillPromptPanelOpen, semanticPanelOpen, productPanelOpen, fixedPanelOpen]);
+  }, [charPanelOpen, stillPromptPanelOpen, semanticPanelOpen, productPanelOpen, fixedPanelOpen, historyPanelOpen]);
 
   // VideoModal状態
   const [videoModalOpen, setVideoModalOpen] = useState(false);
   const [storyboardModalOpen, setStoryboardModalOpen] = useState(false);
+
+  // ライトボックスのESCキー処理
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && lightboxImage) {
+        setLightboxImage(null);
+      }
+    };
+    document.addEventListener('keydown', handleEsc);
+    return () => document.removeEventListener('keydown', handleEsc);
+  }, [lightboxImage]);
+
+  // 履歴を読み込み
+  useEffect(() => {
+    setProjectHistory(getProjectHistory());
+  }, []);
+
+  // プロジェクトを保存
+  const saveCurrentProject = () => {
+    if (cuts.length === 0) {
+      alert('保存するカットがありません');
+      return;
+    }
+    const name = generateProjectName(cuts, extractedPdfText);
+    const entry = saveToProjectHistory({
+      name,
+      cuts,
+      stagePrompt,
+      extractedPdfText,
+      mainCharPrompt,
+      subCharPrompt,
+      aiModel,
+      budget: projectBudget,
+      generationTimes: generationTimes,
+    });
+    setCurrentProjectId(entry.id);
+    setProjectHistory(getProjectHistory());
+    alert(`「${name}」を保存しました`);
+  };
+
+  // プロジェクトを復元
+  const loadProject = (entry: ProjectHistoryEntry) => {
+    setCuts(entry.cuts);
+    setStagePrompt(entry.stagePrompt);
+    setExtractedPdfText(entry.extractedPdfText);
+    setMainCharPrompt(entry.mainCharPrompt || '');
+    setAiModel(entry.aiModel as AiModelType);
+    setProjectBudget(entry.budget || DEFAULT_BUDGET);
+    setGenerationTimes(entry.generationTimes || {});
+    setCurrentProjectId(entry.id);
+    setHistoryPanelOpen(false);
+    setEditingCutId(null);
+  };
+
+  // プロジェクトを削除
+  const deleteProject = (id: string) => {
+    if (confirm('このプロジェクトを削除しますか？')) {
+      removeFromProjectHistory(id);
+      setProjectHistory(getProjectHistory());
+      if (currentProjectId === id) {
+        setCurrentProjectId(null);
+      }
+    }
+  };
+
+  // キャラクター変更後の再生成トリガー
+  useEffect(() => {
+    const runRegenerate = async () => {
+      if (pendingRegenerate && characterConfirmed && humanFile && extractedPdfText) {
+        setPendingRegenerate(false);
+        setCharPanelOpen(false);
+        try {
+          setIsGenerating(true);
+          await handleFullAutoGenerate(extractedPdfText);
+        } finally {
+          setIsGenerating(false);
+        }
+      }
+    };
+    runRegenerate();
+  }, [pendingRegenerate, characterConfirmed, humanFile, extractedPdfText]);
 
   // タブタイトルアニメーション
   const originalTitle = useRef('ショート動画AI - 自動生成');
@@ -588,14 +1286,37 @@ JSON配列形式で出力してください。`
       <header className="glass sticky top-0 z-40 border-b border-[#E0E0E0]">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-xl font-black shadow-lg shadow-purple-500/20 text-white">
-              動
+            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-violet-600 via-fuchsia-500 to-pink-500 flex items-center justify-center shadow-lg shadow-violet-500/25">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="5 3 19 12 5 21 5 3" />
+              </svg>
             </div>
             <div>
-              <h1 className="text-lg font-extrabold text-[#333333] tracking-tight">
-                ショート動画 AI
+              <h1 className="text-lg font-extrabold text-[#333333] dark:text-white tracking-tight">
+                Snafty <span className="text-transparent bg-clip-text bg-gradient-to-r from-violet-500 to-fuchsia-500">Studio</span>
               </h1>
-              <p className="text-[10px] text-[#78909C] -mt-0.5 tracking-widest font-medium">７カット自動生成スタジオ</p>
+              <p className="text-[10px] text-[#78909C] dark:text-gray-500 -mt-0.5 tracking-widest font-medium">Short Movie AI Generator</p>
+            </div>
+            {/* API Status Indicators */}
+            <div className="flex items-center gap-1.5 ml-2 px-2.5 py-1.5 bg-gray-50 dark:bg-white/5 rounded-lg border border-gray-200 dark:border-white/10">
+              {([
+                { key: 'openai', label: 'GPT' },
+                { key: 'gemini', label: 'Gem' },
+                { key: 'claude', label: 'Cld' },
+              ] as const).map(({ key, label }) => (
+                <div key={key} className="flex items-center gap-1" title={`${label}: ${apiStatuses[key] === 'ok' ? '稼働中' : apiStatuses[key] === 'error' ? 'エラー' : 'チェック中'}`}>
+                  <div className={`w-1.5 h-1.5 rounded-full ${
+                    apiStatuses[key] === 'ok' ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50' :
+                    apiStatuses[key] === 'error' ? 'bg-red-500 shadow-sm shadow-red-500/50' :
+                    'bg-gray-400 animate-pulse'
+                  }`} />
+                  <span className={`text-[8px] font-bold ${
+                    apiStatuses[key] === 'ok' ? 'text-emerald-600 dark:text-emerald-400' :
+                    apiStatuses[key] === 'error' ? 'text-red-500 dark:text-red-400' :
+                    'text-gray-400'
+                  }`}>{label}</span>
+                </div>
+              ))}
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -613,7 +1334,9 @@ JSON配列形式で出力してください。`
                   }}
                   className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
                     aiModel === model
-                      ? model === 'openai'
+                      ? apiStatuses[model] === 'error'
+                        ? 'bg-red-500 text-white shadow-sm shadow-red-500/30'
+                        : model === 'openai'
                         ? 'bg-green-500 text-white shadow-sm shadow-green-500/30'
                         : model === 'gemini'
                         ? 'bg-blue-500 text-white shadow-sm shadow-blue-500/30'
@@ -648,88 +1371,491 @@ JSON配列形式で出力してください。`
 
                 {/* Character Panel Dropdown */}
                 {charPanelOpen && (
-                  <div className="absolute right-0 top-full mt-2 w-[480px] bg-white dark:bg-[#16161e] border border-[#E0E0E0] dark:border-white/10 rounded-2xl shadow-2xl dark:shadow-purple-500/5 p-4 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
-                    <div className="flex items-center gap-2 mb-4">
-                      <div className="w-1 h-4 rounded-full bg-gradient-to-b from-cyan-400 to-purple-500"></div>
-                      <h3 className="text-xs font-bold text-[#333] dark:text-gray-200 uppercase tracking-wider">キャラクター設定</h3>
+                  <div className="absolute right-0 top-full mt-2 w-[520px] bg-white dark:bg-[#16161e] border border-[#E0E0E0] dark:border-white/10 rounded-2xl shadow-2xl dark:shadow-purple-500/5 p-4 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2">
+                        <div className="w-1 h-4 rounded-full bg-gradient-to-b from-cyan-400 to-purple-500"></div>
+                        <h3 className="text-xs font-bold text-[#333] dark:text-gray-200 uppercase tracking-wider">キャラクター設定</h3>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {/* プリセット読み込みドロップダウン */}
+                        {characterPresets.length > 0 && (
+                          <div className="relative group">
+                            <button className="flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-bold bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20 transition-colors">
+                              <FolderOpen size={10} />
+                              読込
+                              <ChevronDown size={10} />
+                            </button>
+                            <div className="absolute right-0 top-full mt-1 w-48 bg-white dark:bg-[#1a1a24] border border-gray-200 dark:border-white/10 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+                              {characterPresets.map((preset) => (
+                                <div key={preset.id} className="flex items-center justify-between px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-white/5 first:rounded-t-lg last:rounded-b-lg">
+                                  <button
+                                    onClick={() => loadCharacterPreset(preset)}
+                                    className="flex-1 text-left text-[10px] text-[#333] dark:text-gray-300 truncate"
+                                  >
+                                    {preset.name}
+                                  </button>
+                                  <button
+                                    onClick={() => deleteCharacterPreset(preset.id)}
+                                    className="p-0.5 text-gray-400 hover:text-red-500 transition-colors"
+                                  >
+                                    <Trash2 size={10} />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {/* プリセット保存ボタン */}
+                        <button
+                          onClick={() => setShowPresetSaveModal(true)}
+                          className="flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+                        >
+                          <Save size={10} />
+                          保存
+                        </button>
+                      </div>
                     </div>
+
+                    {/* プリセット保存モーダル */}
+                    {showPresetSaveModal && (
+                      <div className="mb-4 p-3 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 rounded-lg">
+                        <label className="text-[9px] font-bold text-emerald-700 dark:text-emerald-400 block mb-1">プリセット名</label>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={presetNameInput}
+                            onChange={(e) => setPresetNameInput(e.target.value)}
+                            placeholder="例: カジュアルスタイル"
+                            className="flex-1 bg-white dark:bg-white/10 border border-emerald-300 dark:border-emerald-500/30 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none"
+                            onKeyDown={(e) => e.key === 'Enter' && saveCharacterPreset()}
+                          />
+                          <button
+                            onClick={saveCharacterPreset}
+                            className="px-3 py-1 bg-emerald-500 text-white rounded text-[9px] font-bold hover:bg-emerald-600 transition-colors"
+                          >
+                            保存
+                          </button>
+                          <button
+                            onClick={() => setShowPresetSaveModal(false)}
+                            className="px-2 py-1 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     
                     <div className="flex flex-col gap-6">
                       {/* Main Character Row */}
-                      <div className="flex gap-4 items-end border-b border-[#E0E0E0] dark:border-white/10 pb-4">
-                        <div className="w-[140px] shrink-0">
-                          <ImageUploader
-                            label="メインモデル"
-                            icon={<User size={16} />}
-                            previewUrl={humanPreview}
-                            onFileSelect={handleHumanSelect}
-                            onClear={() => { setHumanFile(null); setHumanPreview(null); }}
-                            accentColor="#00d4ff"
-                            hint="正面の全身画像"
-                            compact
-                          />
-                        </div>
-                        <div className="flex-1 space-y-2">
-                          <div>
-                            <label className="text-[10px] font-bold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">感情・基本挙動プロンプト</label>
-                            <textarea
-                              value={mainCharPrompt}
-                              onChange={(e) => setMainCharPrompt(e.target.value)}
-                              placeholder="感情、追加の容姿、服装などを入力..."
-                              rows={3}
-                              className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg px-2.5 py-2 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50 placeholder:text-gray-400 dark:placeholder:text-gray-600 resize-none"
+                      <div className="border-b border-[#E0E0E0] dark:border-white/10 pb-4">
+                        <div className="flex gap-4 items-end">
+                          <div className="w-[140px] shrink-0">
+                            <ImageUploader
+                              label="メインモデル"
+                              icon={<User size={16} />}
+                              previewUrl={humanPreview}
+                              onFileSelect={handleHumanSelect}
+                              onClear={() => { setHumanFile(null); setHumanPreview(null); }}
+                              accentColor="#00d4ff"
+                              hint="正面の全身画像"
+                              compact
                             />
+                          </div>
+                          <div className="flex-1 space-y-2">
+                            <div>
+                              <div className="flex items-center justify-between mb-1.5">
+                                <label className="text-[10px] font-bold text-[#78909C] dark:text-gray-400 uppercase tracking-wider">カスタム指示</label>
+                                <div className="flex items-center gap-1">
+                                  {!showPresetInput ? (
+                                    <button
+                                      onClick={() => setShowPresetInput(true)}
+                                      disabled={mainCustomInstructions.length === 0 && subCustomInstructions.length === 0}
+                                      className="flex items-center gap-0.5 px-1.5 py-0.5 text-[8px] font-bold text-violet-500 hover:text-violet-600 border border-violet-200 dark:border-violet-500/20 rounded hover:bg-violet-50 dark:hover:bg-violet-500/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                                      title="現在のカスタム指示をプリセットとして保存"
+                                    >
+                                      <Save size={9} />
+                                      保存
+                                    </button>
+                                  ) : (
+                                    <div className="flex items-center gap-1">
+                                      <input
+                                        type="text"
+                                        value={presetName}
+                                        onChange={(e) => setPresetName(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && saveInstructionPreset()}
+                                        placeholder="プリセット名"
+                                        className="w-24 bg-white dark:bg-white/10 border border-violet-200 dark:border-violet-500/20 rounded px-1.5 py-0.5 text-[9px] text-[#333] dark:text-gray-300 focus:outline-none"
+                                        autoFocus
+                                      />
+                                      <button onClick={saveInstructionPreset} disabled={!presetName.trim()} className="p-0.5 bg-violet-500 text-white rounded hover:bg-violet-600 disabled:bg-gray-300 transition-colors"><Plus size={9} /></button>
+                                      <button onClick={() => { setShowPresetInput(false); setPresetName(''); }} className="p-0.5 text-gray-400 hover:text-gray-600 transition-colors"><X size={9} /></button>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                              {/* プリセット一覧 */}
+                              {instructionPresets.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mb-2">
+                                  {instructionPresets.map((preset, idx) => (
+                                    <div
+                                      key={idx}
+                                      className="group flex items-center gap-1 px-2 py-0.5 rounded-md text-[8px] font-bold border border-violet-200 dark:border-violet-500/20 bg-violet-50 dark:bg-violet-500/10 text-violet-600 dark:text-violet-300 cursor-pointer hover:bg-violet-100 dark:hover:bg-violet-500/20 transition-colors"
+                                      onClick={() => loadInstructionPreset(preset)}
+                                      title={`メイン: ${preset.mainInstructions.length}件 / サブ: ${preset.subInstructions.length}件\n保存: ${new Date(preset.savedAt).toLocaleDateString('ja-JP')}`}
+                                    >
+                                      <FolderOpen size={9} />
+                                      {preset.name}
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); deleteInstructionPreset(idx); }}
+                                        className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 transition-all"
+                                      >
+                                        <X size={8} />
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {/* カスタム指示ブロック */}
+                              <div className="flex flex-wrap gap-1.5 mb-2">
+                                {mainCustomInstructions.map((instruction) => (
+                                  <div
+                                    key={instruction.id}
+                                    className={`group relative flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-bold border transition-all duration-150 cursor-pointer ${
+                                      instruction.active
+                                        ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-600 dark:text-cyan-300'
+                                        : 'bg-transparent border-gray-200 dark:border-white/10 text-gray-400 dark:text-gray-600'
+                                    }`}
+                                    onClick={() => toggleCustomInstruction(true, instruction.id)}
+                                  >
+                                    {instruction.label}
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); removeCustomInstruction(true, instruction.id); }}
+                                      className="opacity-0 group-hover:opacity-100 ml-0.5 text-gray-400 hover:text-red-500 transition-all"
+                                    >
+                                      <X size={10} />
+                                    </button>
+                                  </div>
+                                ))}
+                                {/* 追加ボタン */}
+                                {!showMainInstructionInput ? (
+                                  <button
+                                    onClick={() => setShowMainInstructionInput(true)}
+                                    className="flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-medium border border-dashed border-cyan-300 dark:border-cyan-500/30 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-50 dark:hover:bg-cyan-500/10 transition-colors"
+                                  >
+                                    <Plus size={10} />
+                                    カスタム指示を追加
+                                  </button>
+                                ) : (
+                                  <div className="flex items-center gap-1 p-1 bg-cyan-50 dark:bg-cyan-500/10 rounded-lg border border-cyan-200 dark:border-cyan-500/30">
+                                    <input
+                                      type="text"
+                                      value={newMainInstruction.label}
+                                      onChange={(e) => setNewMainInstruction(prev => ({ ...prev, label: e.target.value }))}
+                                      placeholder="ラベル名"
+                                      className="w-20 bg-white dark:bg-white/10 border border-cyan-200 dark:border-cyan-500/20 rounded px-1.5 py-0.5 text-[9px] text-[#333] dark:text-gray-300 focus:outline-none"
+                                      onKeyDown={(e) => e.key === 'Enter' && addCustomInstruction(true)}
+                                      autoFocus
+                                    />
+                                    <input
+                                      type="text"
+                                      value={newMainInstruction.prompt}
+                                      onChange={(e) => setNewMainInstruction(prev => ({ ...prev, prompt: e.target.value }))}
+                                      placeholder="英語プロンプト（任意）"
+                                      className="w-32 bg-white dark:bg-white/10 border border-cyan-200 dark:border-cyan-500/20 rounded px-1.5 py-0.5 text-[9px] text-[#333] dark:text-gray-300 focus:outline-none"
+                                      onKeyDown={(e) => e.key === 'Enter' && addCustomInstruction(true)}
+                                    />
+                                    <button
+                                      onClick={() => addCustomInstruction(true)}
+                                      disabled={!newMainInstruction.label.trim()}
+                                      className="p-1 bg-cyan-500 text-white rounded hover:bg-cyan-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                      <Plus size={10} />
+                                    </button>
+                                    <button
+                                      onClick={() => { setShowMainInstructionInput(false); setNewMainInstruction({ label: '', prompt: '' }); }}
+                                      className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+                                    >
+                                      <X size={10} />
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">感情・基本挙動プロンプト</label>
+                              <textarea
+                                value={mainCharPrompt}
+                                onChange={(e) => setMainCharPrompt(e.target.value)}
+                                placeholder="感情、追加の容姿、服装などを入力..."
+                                rows={2}
+                                className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg px-2.5 py-2 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50 placeholder:text-gray-400 dark:placeholder:text-gray-600 resize-none"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Main Character Detail Blocks */}
+                        {mainCharDetails.length > 0 && (
+                          <div className="mt-3 ml-[156px] space-y-2">
+                            {mainCharDetails.map((detail) => (
+                              <div key={detail.id} className="flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                                <span className="text-[9px] font-bold text-cyan-600 dark:text-cyan-400 w-16 shrink-0">{detail.label}</span>
+                                <input
+                                  type="text"
+                                  value={detail.value}
+                                  onChange={(e) => updateCharacterDetail(true, detail.id, e.target.value)}
+                                  placeholder={DETAIL_PRESETS.find(p => p.label === detail.label)?.placeholder || '詳細を入力...'}
+                                  className="flex-1 bg-cyan-50 dark:bg-cyan-500/10 border border-cyan-200 dark:border-cyan-500/20 rounded-lg px-2 py-1.5 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50 placeholder:text-gray-400 dark:placeholder:text-gray-600"
+                                />
+                                <button
+                                  onClick={() => removeCharacterDetail(true, detail.id)}
+                                  className="p-1 text-gray-400 hover:text-red-500 transition-colors"
+                                >
+                                  <X size={12} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Add Detail Button for Main Character */}
+                        <div className="mt-3 ml-[156px]">
+                          <div className="flex flex-wrap gap-1 mb-2">
+                            {DETAIL_PRESETS.filter(p => !mainCharDetails.some(d => d.label === p.label)).map((preset) => (
+                              <button
+                                key={preset.label}
+                                onClick={() => addCharacterDetail(true, preset.label)}
+                                className="flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-medium border border-dashed border-cyan-300 dark:border-cyan-500/30 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-50 dark:hover:bg-cyan-500/10 transition-colors"
+                              >
+                                <Plus size={10} />
+                                {preset.label}
+                              </button>
+                            ))}
+                          </div>
+                          {/* カスタムフィールド追加 */}
+                          <div className="flex gap-1 items-center">
+                            <input
+                              type="text"
+                              value={customFieldInput}
+                              onChange={(e) => setCustomFieldInput(e.target.value)}
+                              placeholder="カスタム項目名..."
+                              className="flex-1 bg-white dark:bg-white/5 border border-cyan-200 dark:border-cyan-500/20 rounded px-2 py-1 text-[9px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50 placeholder:text-gray-400"
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && customFieldInput.trim()) {
+                                  addCharacterDetail(true, customFieldInput.trim());
+                                  setCustomFieldInput('');
+                                }
+                              }}
+                            />
+                            <button
+                              onClick={() => {
+                                if (customFieldInput.trim()) {
+                                  addCharacterDetail(true, customFieldInput.trim());
+                                  setCustomFieldInput('');
+                                }
+                              }}
+                              disabled={!customFieldInput.trim()}
+                              className={`flex items-center gap-1 px-2 py-1 rounded text-[9px] font-bold transition-all ${
+                                customFieldInput.trim()
+                                  ? 'bg-cyan-500 text-white hover:bg-cyan-600'
+                                  : 'bg-gray-100 dark:bg-white/5 text-gray-400 cursor-not-allowed'
+                              }`}
+                            >
+                              <Plus size={10} />
+                              追加
+                            </button>
                           </div>
                         </div>
                       </div>
 
                       {/* Sub Character Row */}
-                      <div className="flex gap-4 items-end border-b border-[#E0E0E0] dark:border-white/10 pb-4">
-                        <div className="w-[140px] shrink-0">
-                          <ImageUploader
-                            label="IP"
-                            icon={<Users size={16} />}
-                            previewUrl={subCharPreview}
-                            onFileSelect={handleSubCharSelect}
-                            onClear={() => { setSubCharFile(null); setSubCharPreview(null); }}
-                            accentColor="#a855f7"
-                            hint="共演IP（任意）"
-                            compact
-                          />
-                        </div>
-                        <div className="flex-1 space-y-2">
-                          <div className={!subCharFile ? "opacity-50 pointer-events-none" : ""}>
-                            <label className="text-[10px] font-bold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">感情・IPプロンプト</label>
+                      <div className="border-b border-[#E0E0E0] dark:border-white/10 pb-4">
+                        <div className="flex gap-4 items-end">
+                          <div className="w-[140px] shrink-0">
+                            <ImageUploader
+                              label="IP"
+                              icon={<Users size={16} />}
+                              previewUrl={subCharPreview}
+                              onFileSelect={handleSubCharSelect}
+                              onClear={() => { setSubCharFile(null); setSubCharPreview(null); }}
+                              accentColor="#a855f7"
+                              hint="共演IP（任意）"
+                              compact
+                            />
+                          </div>
+                          <div className="flex-1 space-y-2">
+                            <div className={!subCharFile ? "opacity-50 pointer-events-none" : ""}>
+                              <label className="text-[10px] font-bold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">感情・IPプロンプト</label>
 
-                            {/* Preset tags */}
-                            <div className="flex flex-wrap gap-1 mb-2">
-                              {SUB_CHAR_PRESETS.map((tag) => (
+                              {/* Preset tags */}
+                              <div className="flex flex-wrap gap-1.5 mb-2">
+                                {SUB_CHAR_PRESETS.map((tag) => (
+                                  <button
+                                    key={tag.id}
+                                    onClick={() => setActiveSubTags(prev => {
+                                      const next = new Set(prev);
+                                      next.has(tag.id) ? next.delete(tag.id) : next.add(tag.id);
+                                      return next;
+                                    })}
+                                    className={`px-2 py-1 rounded-lg text-[9px] font-bold border transition-all duration-150 ${
+                                      activeSubTags.has(tag.id)
+                                        ? 'bg-purple-500/15 border-purple-500/40 text-purple-500 dark:text-purple-300'
+                                        : 'bg-transparent border-gray-200 dark:border-white/10 text-gray-400 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-400'
+                                    }`}
+                                  >
+                                    {tag.label}
+                                  </button>
+                                ))}
+                                {/* カスタム指示ブロック（サブキャラ） */}
+                                {subCustomInstructions.map((instruction) => (
+                                  <div
+                                    key={instruction.id}
+                                    className={`group relative flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-bold border transition-all duration-150 cursor-pointer ${
+                                      instruction.active
+                                        ? 'bg-purple-500/15 border-purple-500/40 text-purple-500 dark:text-purple-300'
+                                        : 'bg-transparent border-gray-200 dark:border-white/10 text-gray-400 dark:text-gray-600'
+                                    }`}
+                                    onClick={() => toggleCustomInstruction(false, instruction.id)}
+                                  >
+                                    {instruction.label}
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); removeCustomInstruction(false, instruction.id); }}
+                                      className="opacity-0 group-hover:opacity-100 ml-0.5 text-gray-400 hover:text-red-500 transition-all"
+                                    >
+                                      <X size={10} />
+                                    </button>
+                                  </div>
+                                ))}
+                                {/* 追加ボタン */}
+                                {!showSubInstructionInput ? (
+                                  <button
+                                    onClick={() => setShowSubInstructionInput(true)}
+                                    className="flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-medium border border-dashed border-purple-300 dark:border-purple-500/30 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-500/10 transition-colors"
+                                  >
+                                    <Plus size={10} />
+                                    カスタム指示を追加
+                                  </button>
+                                ) : (
+                                  <div className="flex items-center gap-1 p-1 bg-purple-50 dark:bg-purple-500/10 rounded-lg border border-purple-200 dark:border-purple-500/30">
+                                    <input
+                                      type="text"
+                                      value={newSubInstruction.label}
+                                      onChange={(e) => setNewSubInstruction(prev => ({ ...prev, label: e.target.value }))}
+                                      placeholder="ラベル名"
+                                      className="w-20 bg-white dark:bg-white/10 border border-purple-200 dark:border-purple-500/20 rounded px-1.5 py-0.5 text-[9px] text-[#333] dark:text-gray-300 focus:outline-none"
+                                      onKeyDown={(e) => e.key === 'Enter' && addCustomInstruction(false)}
+                                      autoFocus
+                                    />
+                                    <input
+                                      type="text"
+                                      value={newSubInstruction.prompt}
+                                      onChange={(e) => setNewSubInstruction(prev => ({ ...prev, prompt: e.target.value }))}
+                                      placeholder="英語プロンプト（任意）"
+                                      className="w-32 bg-white dark:bg-white/10 border border-purple-200 dark:border-purple-500/20 rounded px-1.5 py-0.5 text-[9px] text-[#333] dark:text-gray-300 focus:outline-none"
+                                      onKeyDown={(e) => e.key === 'Enter' && addCustomInstruction(false)}
+                                    />
+                                    <button
+                                      onClick={() => addCustomInstruction(false)}
+                                      disabled={!newSubInstruction.label.trim()}
+                                      className="p-1 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                      <Plus size={10} />
+                                    </button>
+                                    <button
+                                      onClick={() => { setShowSubInstructionInput(false); setNewSubInstruction({ label: '', prompt: '' }); }}
+                                      className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+                                    >
+                                      <X size={10} />
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                              <input
+                                type="text"
+                                value={customSubPrompt}
+                                onChange={(e) => setCustomSubPrompt(e.target.value)}
+                                placeholder="追加の指示を入力..."
+                                className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg px-2.5 py-1.5 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50 placeholder:text-gray-400 dark:placeholder:text-gray-600"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Sub Character Detail Blocks */}
+                        {subCharDetails.length > 0 && subCharFile && (
+                          <div className="mt-3 ml-[156px] space-y-2">
+                            {subCharDetails.map((detail) => (
+                              <div key={detail.id} className="flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                                <span className="text-[9px] font-bold text-purple-600 dark:text-purple-400 w-16 shrink-0">{detail.label}</span>
+                                <input
+                                  type="text"
+                                  value={detail.value}
+                                  onChange={(e) => updateCharacterDetail(false, detail.id, e.target.value)}
+                                  placeholder={DETAIL_PRESETS.find(p => p.label === detail.label)?.placeholder || '詳細を入力...'}
+                                  className="flex-1 bg-purple-50 dark:bg-purple-500/10 border border-purple-200 dark:border-purple-500/20 rounded-lg px-2 py-1.5 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50 placeholder:text-gray-400 dark:placeholder:text-gray-600"
+                                />
                                 <button
-                                  key={tag.id}
-                                  onClick={() => setActiveSubTags(prev => {
-                                    const next = new Set(prev);
-                                    next.has(tag.id) ? next.delete(tag.id) : next.add(tag.id);
-                                    return next;
-                                  })}
-                                  className={`px-1.5 py-0.5 rounded text-[8px] font-bold border transition-all duration-150 ${
-                                    activeSubTags.has(tag.id)
-                                      ? 'bg-purple-500/15 border-purple-500/40 text-purple-500 dark:text-purple-300'
-                                      : 'bg-transparent border-gray-200 dark:border-white/10 text-gray-400 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-400'
-                                  }`}
+                                  onClick={() => removeCharacterDetail(false, detail.id)}
+                                  className="p-1 text-gray-400 hover:text-red-500 transition-colors"
                                 >
-                                  {tag.label}
+                                  <X size={12} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Add Detail Button for Sub Character */}
+                        {subCharFile && (
+                          <div className="mt-3 ml-[156px]">
+                            <div className="flex flex-wrap gap-1 mb-2">
+                              {DETAIL_PRESETS.filter(p => !subCharDetails.some(d => d.label === p.label)).map((preset) => (
+                                <button
+                                  key={preset.label}
+                                  onClick={() => addCharacterDetail(false, preset.label)}
+                                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-medium border border-dashed border-purple-300 dark:border-purple-500/30 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-500/10 transition-colors"
+                                >
+                                  <Plus size={10} />
+                                  {preset.label}
                                 </button>
                               ))}
                             </div>
-                            <input
-                              type="text"
-                              value={customSubPrompt}
-                              onChange={(e) => setCustomSubPrompt(e.target.value)}
-                              placeholder="追加の指示を入力..."
-                              className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg px-2.5 py-1.5 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50 placeholder:text-gray-400 dark:placeholder:text-gray-600"
-                            />
+                            {/* カスタムフィールド追加 */}
+                            <div className="flex gap-1 items-center">
+                              <input
+                                type="text"
+                                value={customFieldInputSub}
+                                onChange={(e) => setCustomFieldInputSub(e.target.value)}
+                                placeholder="カスタム項目名..."
+                                className="flex-1 bg-white dark:bg-white/5 border border-purple-200 dark:border-purple-500/20 rounded px-2 py-1 text-[9px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50 placeholder:text-gray-400"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && customFieldInputSub.trim()) {
+                                    addCharacterDetail(false, customFieldInputSub.trim());
+                                    setCustomFieldInputSub('');
+                                  }
+                                }}
+                              />
+                              <button
+                                onClick={() => {
+                                  if (customFieldInputSub.trim()) {
+                                    addCharacterDetail(false, customFieldInputSub.trim());
+                                    setCustomFieldInputSub('');
+                                  }
+                                }}
+                                disabled={!customFieldInputSub.trim()}
+                                className={`flex items-center gap-1 px-2 py-1 rounded text-[9px] font-bold transition-all ${
+                                  customFieldInputSub.trim()
+                                    ? 'bg-purple-500 text-white hover:bg-purple-600'
+                                    : 'bg-gray-100 dark:bg-white/5 text-gray-400 cursor-not-allowed'
+                                }`}
+                              >
+                                <Plus size={10} />
+                                追加
+                              </button>
+                            </div>
                           </div>
-                        </div>
+                        )}
                       </div>
 
                       {/* Per-Cut Character Assignment */}
@@ -837,6 +1963,138 @@ JSON配列形式で出力してください。`
                 {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
               </button>
 
+              {/* History Button in Header */}
+              <div className="relative" ref={historyPanelRef}>
+                <button
+                  onClick={() => setHistoryPanelOpen(!historyPanelOpen)}
+                  className={`p-2 rounded-xl border transition-all shadow-sm flex items-center gap-1.5 ${
+                    historyPanelOpen
+                      ? 'bg-indigo-500/10 border-indigo-300 dark:border-indigo-500/30 text-indigo-600 dark:text-indigo-400'
+                      : 'bg-[#FAFAFA] dark:bg-[#1a1a24] text-[#78909C] border-[#E0E0E0] dark:border-white/10 hover:bg-[#F5F5F5] dark:hover:bg-[#2a2a36] hover:text-[#333333] dark:hover:text-white'
+                  }`}
+                  title="プロジェクト履歴"
+                >
+                  <History size={18} />
+                  {projectHistory.length > 0 && (
+                    <span className="text-[10px] font-bold">{projectHistory.length}</span>
+                  )}
+                </button>
+
+                {/* History Dropdown Panel */}
+                {historyPanelOpen && (
+                  <div className="absolute top-full right-0 mt-2 w-[320px] bg-white dark:bg-[#16161e] border border-[#E0E0E0] dark:border-white/10 rounded-xl shadow-2xl dark:shadow-indigo-500/5 p-3 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-1.5">
+                        <History size={14} className="text-indigo-500" />
+                        <h3 className="text-[11px] font-bold text-[#333] dark:text-gray-200">プロジェクト履歴</h3>
+                        <span className="text-[9px] text-gray-400">({projectHistory.length})</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={saveCurrentProject}
+                          disabled={cuts.length === 0}
+                          className="flex items-center gap-1 px-2 py-1 rounded text-[9px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="現在のプロジェクトを保存"
+                        >
+                          <Save size={10} />
+                          保存
+                        </button>
+                        <button
+                          onClick={() => setHistoryPanelOpen(false)}
+                          className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-sm"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Search Input */}
+                    {projectHistory.length > 0 && (
+                      <div className="relative mb-3">
+                        <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input
+                          type="text"
+                          value={historySearchQuery}
+                          onChange={(e) => setHistorySearchQuery(e.target.value)}
+                          placeholder="プロジェクトを検索..."
+                          className="w-full pl-7 pr-3 py-1.5 text-[10px] bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg focus:outline-none focus:border-indigo-500/50 placeholder:text-gray-400"
+                        />
+                        {historySearchQuery && (
+                          <button
+                            onClick={() => setHistorySearchQuery('')}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                          >
+                            <X size={10} />
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {projectHistory.length === 0 ? (
+                      <div className="text-center py-6">
+                        <FolderOpen size={24} className="mx-auto text-gray-300 dark:text-gray-600 mb-2" />
+                        <p className="text-[10px] text-[#78909C] dark:text-gray-500">保存されたプロジェクトはありません</p>
+                        <p className="text-[8px] text-[#9E9E9E] mt-1">生成すると自動保存されます</p>
+                      </div>
+                    ) : filteredHistory.length === 0 ? (
+                      <div className="text-center py-4">
+                        <Search size={20} className="mx-auto text-gray-300 dark:text-gray-600 mb-2" />
+                        <p className="text-[10px] text-[#78909C] dark:text-gray-500">「{historySearchQuery}」に一致する<br />プロジェクトが見つかりません</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar">
+                        {filteredHistory.map((entry) => (
+                          <div
+                            key={entry.id}
+                            className={`p-2.5 rounded-lg border transition-all cursor-pointer ${
+                              currentProjectId === entry.id
+                                ? 'bg-indigo-50 dark:bg-indigo-500/10 border-indigo-300 dark:border-indigo-500/30'
+                                : 'bg-gray-50 dark:bg-white/5 border-gray-200 dark:border-white/10 hover:bg-gray-100 dark:hover:bg-white/10'
+                            }`}
+                            onClick={() => loadProject(entry)}
+                          >
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-[11px] font-bold text-[#333] dark:text-gray-200 truncate">{entry.name}</p>
+                                <p className="text-[9px] text-[#78909C] dark:text-gray-500 mt-0.5">
+                                  {entry.cuts.length}カット • {new Date(entry.timestamp).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                </p>
+                                {entry.generationTimes && (entry.generationTimes.cutComposition || entry.generationTimes.totalTime) && (
+                                  <div className="flex flex-wrap gap-1.5 mt-1">
+                                    {entry.generationTimes.cutComposition && (
+                                      <span className="text-[8px] px-1.5 py-0.5 bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 rounded">
+                                        構成: {(entry.generationTimes.cutComposition / 1000).toFixed(1)}秒
+                                      </span>
+                                    )}
+                                    {entry.generationTimes.fixedElements && (
+                                      <span className="text-[8px] px-1.5 py-0.5 bg-purple-100 dark:bg-purple-500/20 text-purple-600 dark:text-purple-400 rounded">
+                                        背景: {(entry.generationTimes.fixedElements / 1000).toFixed(1)}秒
+                                      </span>
+                                    )}
+                                    {entry.generationTimes.totalTime && (
+                                      <span className="text-[8px] px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded">
+                                        合計: {(entry.generationTimes.totalTime / 1000).toFixed(1)}秒
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); deleteProject(entry.id); }}
+                                className="p-1 text-gray-400 hover:text-red-500 transition-colors"
+                                title="削除"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
             {user && (
               <div className="flex items-center gap-4 pl-4 border-l border-[#E0E0E0] md:ml-2">
                 <span className="text-[11px] text-[#78909C]">
@@ -864,44 +2122,51 @@ JSON配列形式で出力してください。`
               <h3 className="text-[10px] font-semibold text-[#78909C] uppercase tracking-wider mb-4">使い方</h3>
               <div className="space-y-4">
                 <div className="flex gap-3">
-                  <div className="w-6 h-6 rounded-full bg-[#00d4ff]/10 text-[#00d4ff] flex items-center justify-center text-[10px] font-bold flex-shrink-0">1</div>
+                  <div className="w-6 h-6 rounded-full bg-violet-500/10 text-violet-500 flex items-center justify-center text-[10px] font-bold flex-shrink-0">1</div>
                   <div>
-                    <p className="text-xs text-[#333333] font-medium">モデル画像をアップロード</p>
-                    <p className="text-[10px] text-[#78909C] mt-0.5">正面向きの全身写真が最適</p>
+                    <p className="text-xs text-[#333333] dark:text-gray-200 font-medium">ストーリーPDFをアップロード</p>
+                    <p className="text-[10px] text-[#78909C] dark:text-gray-500 mt-0.5">シナリオ・プロットのPDFを選択</p>
                   </div>
                 </div>
                 <div className="flex gap-3">
-                  <div className="w-6 h-6 rounded-full bg-[#00BFA5]/10 text-[#00BFA5] flex items-center justify-center text-[10px] font-bold flex-shrink-0">2</div>
+                  <div className="w-6 h-6 rounded-full bg-cyan-500/10 text-cyan-500 flex items-center justify-center text-[10px] font-bold flex-shrink-0">2</div>
                   <div>
-                    <p className="text-xs text-[#333333] font-medium">アイテムをアップロード</p>
-                    <p className="text-[10px] text-[#78909C] mt-0.5">白背景の服単体画像が理想的</p>
+                    <p className="text-xs text-[#333333] dark:text-gray-200 font-medium">キャラクター画像を設定</p>
+                    <p className="text-[10px] text-[#78909C] dark:text-gray-500 mt-0.5">メインモデル（必須）とIP（任意）</p>
                   </div>
                 </div>
                 <div className="flex gap-3">
-                  <div className="w-6 h-6 rounded-full bg-[#00ff88]/10 text-[#00ff88] flex items-center justify-center text-[10px] font-bold flex-shrink-0">3</div>
+                  <div className="w-6 h-6 rounded-full bg-emerald-500/10 text-emerald-500 flex items-center justify-center text-[10px] font-bold flex-shrink-0">3</div>
                   <div>
-                    <p className="text-xs text-[#333333] font-medium">着画を生成</p>
-                    <p className="text-[10px] text-[#78909C] mt-0.5">AIが質問し最適な着画を生成</p>
+                    <p className="text-xs text-[#333333] dark:text-gray-200 font-medium">AIがカット割りを自動生成</p>
+                    <p className="text-[10px] text-[#78909C] dark:text-gray-500 mt-0.5">プロンプト・背景も自動設定</p>
+                  </div>
+                </div>
+                <div className="flex gap-3">
+                  <div className="w-6 h-6 rounded-full bg-purple-500/10 text-purple-500 flex items-center justify-center text-[10px] font-bold flex-shrink-0">4</div>
+                  <div>
+                    <p className="text-xs text-[#333333] dark:text-gray-200 font-medium">静止画・動画を一括生成</p>
+                    <p className="text-[10px] text-[#78909C] dark:text-gray-500 mt-0.5">各カットの画像→動画を生成</p>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* Features */}
+            {/* Tips */}
             <div>
-              <h3 className="text-[10px] font-semibold text-[#78909C] uppercase tracking-wider mb-4">機能</h3>
+              <h3 className="text-[10px] font-semibold text-[#78909C] uppercase tracking-wider mb-4">再生成のコツ</h3>
               <div className="space-y-2.5">
-                <div className="flex items-center gap-2 text-[11px] text-[#78909C]">
-                  <span className="text-[#00BFA5]">✓</span>
-                  <span>服のデザイン完全再現</span>
+                <div className="flex items-start gap-2 text-[11px] text-[#78909C] dark:text-gray-400">
+                  <span className="text-cyan-500 mt-0.5">💡</span>
+                  <span>キャラを変更したい場合は「キャラ変更＆再生成」</span>
                 </div>
-                <div className="flex items-center gap-2 text-[11px] text-[#78909C]">
-                  <span className="text-[#00BFA5]">✓</span>
-                  <span>服のデザイン完全再現</span>
+                <div className="flex items-start gap-2 text-[11px] text-[#78909C] dark:text-gray-400">
+                  <span className="text-orange-500 mt-0.5">💡</span>
+                  <span>カメラ設定後に「プロンプト再生成」で最適化</span>
                 </div>
-                <div className="flex items-center gap-2 text-[11px] text-[#78909C]">
-                  <span className="text-[#00BFA5]">✓</span>
-                  <span>高解像度出力 (4Kまで)</span>
+                <div className="flex items-start gap-2 text-[11px] text-[#78909C] dark:text-gray-400">
+                  <span className="text-emerald-500 mt-0.5">💡</span>
+                  <span>背景は「再生成」ボタンで何度でも生成可能</span>
                 </div>
               </div>
             </div>
@@ -909,16 +2174,114 @@ JSON配列形式で出力してください。`
             {/* Best Practices */}
             <div>
               <h3 className="text-[10px] font-semibold text-[#78909C] uppercase tracking-wider mb-4">ベストプラクティス</h3>
-              <div className="space-y-2 text-[10px] text-[#78909C]">
+              <div className="space-y-2 text-[10px] text-[#78909C] dark:text-gray-500">
                 <p>• モデルは正面を向いた全身写真</p>
-                <p>• 服は平置きまたはマネキン着用</p>
-                <p>• 背景はシンプルなものが理想</p>
+                <p>• IP画像は背景透過が理想</p>
+                <p>• カメラ設定で構図を調整</p>
                 <p>• 高解像度の画像を使用</p>
               </div>
             </div>
 
 
-            {/* Tech Stack */}
+            {/* Cost Estimation */}
+            <div>
+              <h3 className="text-[10px] font-semibold text-[#78909C] uppercase tracking-wider mb-4">予算目安（{cuts.length || 7}カット）</h3>
+              <div className="space-y-3 bg-gray-50 dark:bg-white/5 rounded-xl p-3 border border-gray-200 dark:border-white/10">
+                {/* AI Text Generation */}
+                <div>
+                  <p className="text-[9px] font-bold text-[#555] dark:text-gray-400 mb-1">AI（カット生成）</p>
+                  <div className="flex items-center justify-between text-[10px]">
+                    <select
+                      value={selectedModelId}
+                      onChange={(e) => handleModelIdChange(e.target.value)}
+                      className={`text-[10px] font-bold bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded px-1.5 py-0.5 cursor-pointer max-w-[120px] ${
+                        aiModel === 'openai' ? 'text-green-600' : aiModel === 'gemini' ? 'text-blue-600' : 'text-orange-600'
+                      }`}
+                    >
+                      <optgroup label="OpenAI" className="text-green-600">
+                        {availableAiModels.filter(m => m.provider === 'openai').map(m => (
+                          <option key={m.id} value={m.id}>{m.name}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Google" className="text-blue-600">
+                        {availableAiModels.filter(m => m.provider === 'gemini').map(m => (
+                          <option key={m.id} value={m.id}>{m.name}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Anthropic" className="text-orange-600">
+                        {availableAiModels.filter(m => m.provider === 'claude').map(m => (
+                          <option key={m.id} value={m.id}>{m.name}</option>
+                        ))}
+                      </optgroup>
+                    </select>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[#78909C]">≈ $</span>
+                      <input
+                        type="number"
+                        step="0.001"
+                        min="0"
+                        value={projectBudget.aiCostPerCall}
+                        onChange={(e) => setProjectBudget(prev => ({ ...prev, aiCostPerCall: parseFloat(e.target.value) || 0 }))}
+                        className="w-12 text-[10px] text-right bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded px-1 py-0.5"
+                      />
+                      <span className="text-[#78909C]">/回</span>
+                    </div>
+                  </div>
+                </div>
+                {/* Still Image */}
+                <div>
+                  <p className="text-[9px] font-bold text-[#555] dark:text-gray-400 mb-1">静止画（fal.ai）</p>
+                  <div className="flex items-center justify-between text-[10px]">
+                    <span className="text-purple-600">Nanobanana2</span>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[#78909C]">≈ $</span>
+                      <input
+                        type="number"
+                        step="0.001"
+                        min="0"
+                        value={projectBudget.stillImageCost}
+                        onChange={(e) => setProjectBudget(prev => ({ ...prev, stillImageCost: parseFloat(e.target.value) || 0 }))}
+                        className="w-12 text-[10px] text-right bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded px-1 py-0.5"
+                      />
+                      <span className="text-[#78909C]">/枚 × {cuts.length || 7}</span>
+                    </div>
+                  </div>
+                </div>
+                {/* Video */}
+                <div>
+                  <p className="text-[9px] font-bold text-[#555] dark:text-gray-400 mb-1">動画（fal.ai）</p>
+                  <div className="flex items-center justify-between text-[10px]">
+                    <span className="text-pink-600">Kling 2.6</span>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[#78909C]">≈ $</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={projectBudget.videoCost}
+                        onChange={(e) => setProjectBudget(prev => ({ ...prev, videoCost: parseFloat(e.target.value) || 0 }))}
+                        className="w-12 text-[10px] text-right bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded px-1 py-0.5"
+                      />
+                      <span className="text-[#78909C]">/本 × {cuts.length || 7}</span>
+                    </div>
+                  </div>
+                </div>
+                {/* Total */}
+                <div className="pt-2 border-t border-gray-200 dark:border-white/10">
+                  <div className="flex items-center justify-between text-[11px] font-bold">
+                    <span className="text-[#333] dark:text-gray-200">合計（目安）</span>
+                    <span className="text-emerald-600">
+                      ≈ ${(
+                        projectBudget.aiCostPerCall +
+                        (cuts.length || 7) * projectBudget.stillImageCost +
+                        (cuts.length || 7) * projectBudget.videoCost
+                      ).toFixed(2)}
+                    </span>
+                  </div>
+                  <p className="text-[8px] text-[#9E9E9E] mt-1">※ コストは編集可能・プロジェクトに保存されます</p>
+                </div>
+              </div>
+            </div>
 
           </div>
         </aside>
@@ -935,6 +2298,7 @@ JSON配列形式で出力してください。`
               {/* Story PDF → Auto Cut Composition */}
               <StoryPdfUploader
                 aiModel={aiModel}
+                selectedModelId={selectedModelId}
                 onAiModelChange={(model) => {
                   setAiModel(model);
                   localStorage.setItem('snafty_ai_model', model);
@@ -964,13 +2328,6 @@ JSON配列形式で出力してください。`
 
                 {/* Toolbar on the Right */}
                 <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => setStoryboardModalOpen(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all shadow-sm bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-violet-500/20 hover:shadow-violet-500/40 hover:scale-105"
-                  >
-                    <BookOpen size={10} />
-                    PDF自動生成
-                  </button>
                   <button
                     onClick={() => setVideoModalOpen(true)}
                     disabled={isGenerating || !humanFile}
@@ -1048,6 +2405,27 @@ JSON配列形式で出力してください。`
 
                   <div className="w-px h-6 bg-gray-200 dark:bg-white/10 mx-1"></div>
 
+                  {/* キャラクター変更＆再生成ボタン */}
+                  {cuts.length > 0 && extractedPdfText && (
+                    <button
+                      onClick={() => {
+                        setCharacterConfirmed(false);
+                        setPendingRegenerate(true);
+                        setCharPanelOpen(true);
+                      }}
+                      disabled={isGenerating}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all shadow-sm ${
+                        isGenerating
+                          ? 'bg-gray-100 dark:bg-white/5 text-[#9E9E9E] dark:text-gray-500 cursor-not-allowed border outline-none'
+                          : 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white shadow-cyan-500/20 hover:shadow-cyan-500/40 hover:scale-105'
+                      }`}
+                      title="キャラクターを変更してカットを再生成"
+                    >
+                      <RefreshCw size={10} />
+                      キャラ変更＆再生成
+                    </button>
+                  )}
+
                   <button
                     onClick={resetCuts}
                     className="flex items-center gap-1 text-[10px] text-[#78909C] hover:text-[#333] dark:hover:text-gray-300 transition-colors whitespace-nowrap"
@@ -1065,7 +2443,7 @@ JSON配列形式で出力してください。`
                     </div>
                     <p className="text-sm font-medium text-[#555] dark:text-gray-400 mb-2">カットがありません</p>
                     <p className="text-xs text-[#78909C] dark:text-gray-500">
-                      上の「PDF自動生成」からストーリーPDFをアップロードすると、<br />
+                      上の「ストーリーPDF→カット割り」セクションからPDFをアップロードすると、<br />
                       AIが自動でカット構成を生成します
                     </p>
                   </div>
@@ -1082,7 +2460,12 @@ JSON配列形式で出力してください。`
                       {/* Image Thumbnail & Status */}
                       <div className="relative w-11 h-[78px] rounded-md shrink-0 border border-[#E0E0E0] dark:border-white/10 shadow-sm overflow-hidden group bg-[#F5F5F5] dark:bg-white/5 flex items-center justify-center">
                         {cut.generatedImageUrl ? (
-                          <img src={cut.generatedImageUrl} alt="cut" className="w-full h-full object-cover" />
+                          <img
+                            src={cut.generatedImageUrl}
+                            alt="cut"
+                            className="w-full h-full object-cover cursor-pointer"
+                            onClick={() => setLightboxImage({ url: cut.generatedImageUrl!, title: cut.title })}
+                          />
                         ) : (
                           <ImageIcon size={14} className="text-[#B0BEC5] dark:text-gray-500 opacity-50" />
                         )}
@@ -1248,15 +2631,151 @@ JSON配列形式で出力してください。`
                             className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded-lg px-3 py-1.5 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
                           />
                         </div>
+
+                        {/* 詳細フィールド */}
+                        <div className="mt-3 p-3 bg-gray-50/50 dark:bg-white/[0.02] rounded-lg border border-[#E0E0E0] dark:border-white/5">
+                          <label className="text-[9px] text-[#78909C] dark:text-gray-500 uppercase tracking-wider mb-2 block">詳細設定</label>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">表情</label>
+                              <input
+                                type="text"
+                                value={cut.expression || ''}
+                                onChange={(e) => updateCutField(cut.id, 'expression', e.target.value)}
+                                placeholder="笑顔、真剣、驚き..."
+                                className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">視線</label>
+                              <input
+                                type="text"
+                                value={cut.gaze || ''}
+                                onChange={(e) => updateCutField(cut.id, 'gaze', e.target.value)}
+                                placeholder="カメラ目線、前方..."
+                                className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">ポーズ</label>
+                              <input
+                                type="text"
+                                value={cut.pose || ''}
+                                onChange={(e) => updateCutField(cut.id, 'pose', e.target.value)}
+                                placeholder="立ち姿、座る..."
+                                className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">歩き方</label>
+                              <input
+                                type="text"
+                                value={cut.walkingStyle || ''}
+                                onChange={(e) => updateCutField(cut.id, 'walkingStyle', e.target.value)}
+                                placeholder="ゆっくり、自信ある歩行..."
+                                className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">画面位置</label>
+                              <input
+                                type="text"
+                                value={cut.walkPosition || ''}
+                                onChange={(e) => updateCutField(cut.id, 'walkPosition', e.target.value)}
+                                placeholder="中央、左寄り..."
+                                className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">移動距離</label>
+                              <input
+                                type="text"
+                                value={cut.moveDistance || ''}
+                                onChange={(e) => updateCutField(cut.id, 'moveDistance', e.target.value)}
+                                placeholder="短距離、中距離..."
+                                className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
+                              />
+                            </div>
+                            <div className="col-span-2">
+                              <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">アクション</label>
+                              <input
+                                type="text"
+                                value={cut.action || ''}
+                                onChange={(e) => updateCutField(cut.id, 'action', e.target.value)}
+                                placeholder="歩いている、振り返る..."
+                                className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">背景</label>
+                              <input
+                                type="text"
+                                value={cut.background || ''}
+                                onChange={(e) => updateCutField(cut.id, 'background', e.target.value)}
+                                placeholder="街並み、室内..."
+                                className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">プロダクト強調</label>
+                              <input
+                                type="text"
+                                value={cut.productEmphasis || ''}
+                                onChange={(e) => updateCutField(cut.id, 'productEmphasis', e.target.value)}
+                                placeholder="袖、ロゴ..."
+                                className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
                         <div>
-                          <label className="text-[9px] text-[#78909C] dark:text-gray-500 uppercase tracking-wider mb-1.5 mt-3 block">プロンプト詳細</label>
+                          <div className="flex items-center justify-between mb-1.5 mt-3">
+                            <label className="text-[9px] text-[#78909C] dark:text-gray-500 uppercase tracking-wider">プロンプト詳細</label>
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => regenerateCutPromptFromFields(cut.id)}
+                                disabled={regeneratingCutId === cut.id}
+                                className={`flex items-center gap-1 px-2 py-1 rounded text-[9px] font-bold transition-all ${
+                                  regeneratingCutId === cut.id
+                                    ? 'bg-cyan-100 dark:bg-cyan-500/20 text-cyan-500 cursor-wait'
+                                    : 'bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 hover:text-cyan-700'
+                                }`}
+                                title="詳細設定から英語プロンプトを生成"
+                              >
+                                {regeneratingCutId === cut.id ? (
+                                  <><Loader2 size={10} className="animate-spin" /> 翻訳中...</>
+                                ) : (
+                                  <><RefreshCw size={10} /> 詳細→英語化</>
+                                )}
+                              </button>
+                              <button
+                                onClick={() => regenerateCutPrompt(cut.id)}
+                                disabled={regeneratingCutId === cut.id || !extractedPdfText}
+                                className={`flex items-center gap-1 px-2 py-1 rounded text-[9px] font-bold transition-all ${
+                                  regeneratingCutId === cut.id
+                                    ? 'bg-orange-100 dark:bg-orange-500/20 text-orange-500 cursor-wait'
+                                    : !extractedPdfText
+                                    ? 'bg-gray-100 dark:bg-white/5 text-gray-400 cursor-not-allowed'
+                                    : 'bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 dark:text-orange-400 hover:text-orange-700'
+                                }`}
+                                title="AIで完全に再生成"
+                              >
+                                {regeneratingCutId === cut.id ? (
+                                  <><Loader2 size={10} className="animate-spin" /> 再生成中...</>
+                                ) : (
+                                  <><Sparkles size={10} /> 完全再生成</>
+                                )}
+                              </button>
+                            </div>
+                          </div>
                           <textarea
                             value={cut.prompt}
                             onChange={(e) => updateCutField(cut.id, 'prompt', e.target.value)}
                             className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded-lg px-3 py-2 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50 resize-y min-h-[60px]"
                           />
                         </div>
-                        
+
                         {/* Image Generation Section inside Edit */}
                         <div className="pt-2 border-t border-[#E0E0E0] dark:border-white/10 mt-2">
                           <button
@@ -1282,12 +2801,50 @@ JSON配列形式で出力してください。`
                           )}
 
                           {cut.generatedImageUrl && (
-                            <div className="mt-3 relative h-40 bg-black/5 dark:bg-black/20 rounded-lg overflow-hidden border border-[#E0E0E0] dark:border-white/10 flex justify-center items-center p-2">
-                              <img 
-                                src={cut.generatedImageUrl} 
-                                alt={`Generated for ${cut.title}`} 
-                                className="h-full w-auto object-contain rounded drop-shadow-md" 
+                            <div className="mt-3 relative h-40 bg-black/5 dark:bg-black/20 rounded-lg overflow-hidden border border-[#E0E0E0] dark:border-white/10 flex justify-center items-center p-2 group">
+                              <img
+                                src={cut.generatedImageUrl}
+                                alt={`Generated for ${cut.title}`}
+                                className="h-full w-auto object-contain rounded drop-shadow-md"
                               />
+                              {/* Hover overlay with regenerate, upload and zoom buttons */}
+                              {!cut.isGenerating && (
+                                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                  <button
+                                    onClick={() => setLightboxImage({ url: cut.generatedImageUrl!, title: cut.title })}
+                                    className="p-2 rounded-full bg-white/20 hover:bg-white/30 text-white transition-colors flex items-center gap-1"
+                                    title="拡大表示"
+                                  >
+                                    <Maximize2 size={14} />
+                                  </button>
+                                  <label
+                                    className="p-2 rounded-full bg-white/20 hover:bg-white/30 text-white transition-colors cursor-pointer flex items-center gap-1"
+                                    title="画像をアップロード"
+                                  >
+                                    <Upload size={14} />
+                                    <input
+                                      type="file"
+                                      accept="image/*"
+                                      className="hidden"
+                                      onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        if (file) {
+                                          const url = URL.createObjectURL(file);
+                                          setCuts(prev => prev.map(c => c.id === cut.id ? { ...c, generatedImageUrl: url } : c));
+                                        }
+                                        e.target.value = '';
+                                      }}
+                                    />
+                                  </label>
+                                  <button
+                                    onClick={() => generateImageForCut(cut.id)}
+                                    className="p-2 rounded-full bg-white/20 hover:bg-white/30 text-white transition-colors flex items-center gap-1"
+                                    title="画像を再生成"
+                                  >
+                                    <RefreshCw size={14} />
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
@@ -1297,123 +2854,8 @@ JSON配列形式で出力してください。`
                 ))}
               </div>
             </div>
-
-            {/* Video Generation Settings */}
-            <div className="glass rounded-2xl p-4 mt-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-1 h-5 rounded-full bg-gradient-to-b from-blue-400 to-indigo-500"></div>
-                  <h2 className="text-[#333333] dark:text-gray-200 font-semibold text-sm">動画生成設定</h2>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setVideoMetaPanelOpen(!videoMetaPanelOpen)}
-                    className={`text-[10px] sm:text-xs font-bold transition-colors flex items-center gap-1 ${
-                      videoMetaPanelOpen ? 'text-gray-600 dark:text-gray-300' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'
-                    }`}
-                  >
-                    プロンプト指示設定
-                    <ChevronDown size={12} className={`transition-transform duration-200 ${videoMetaPanelOpen ? 'rotate-180' : ''}`} />
-                  </button>
-                  <button
-                    onClick={() => setVideoPromptPanelOpen(!videoPromptPanelOpen)}
-                    className="text-[10px] sm:text-xs text-indigo-600 dark:text-indigo-400 font-bold hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors flex items-center gap-1"
-                  >
-                    設定を開く
-                    <ChevronDown size={12} className={`transition-transform duration-200 ${videoPromptPanelOpen ? 'rotate-180' : ''}`} />
-                  </button>
-                </div>
-              </div>
-
-              {videoMetaPanelOpen && (
-                <div className="space-y-3 animate-in fade-in slide-in-from-top-2 duration-200 pt-3 border-t border-gray-200 dark:border-white/10 mt-2 mb-4 bg-gray-50 dark:bg-white/5 p-3 rounded-lg">
-                  <div>
-                    <label className="text-[10px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-2 block">
-                      [AI用] 動画生成プロンプト指示 (メタプロンプト)
-                    </label>
-                    <textarea
-                      value={videoMetaPrompt}
-                      onChange={(e) => setVideoMetaPrompt(e.target.value)}
-                      placeholder="AIに対する動画モーションの指示ルールなどを入力してください"
-                      className="w-full h-16 bg-white dark:bg-[#1a1a24] border border-gray-200 dark:border-white/10 rounded-lg p-2.5 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-gray-500/50 transition-colors custom-scrollbar resize-y"
-                    />
-                  </div>
-                  <div className="flex justify-end">
-                    <button
-                      onClick={() => {
-                        saveVideoMetaPrompt();
-                        setVideoMetaPanelOpen(false);
-                      }}
-                      className="px-3 py-1.5 bg-gray-200 hover:bg-gray-300 text-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700 dark:text-gray-200 text-[10px] font-bold rounded-lg transition-colors"
-                    >
-                      指示を保存して閉じる
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {videoPromptPanelOpen && (
-                <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-200 pt-3 border-t border-gray-200 dark:border-white/10 mt-2">
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] items-center gap-1.5 flex font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider block">
-                      <span className="bg-indigo-400/20 text-indigo-600 dark:text-indigo-400 w-4 h-4 flex items-center justify-center rounded-full text-[9px]">1</span>
-                      使用モデル (ジェネレーター)
-                    </label>
-                    <select
-                      value={videoGenModel}
-                      onChange={(e) => setVideoGenModel(e.target.value)}
-                      className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg p-2.5 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-indigo-500/50 transition-colors"
-                    >
-                      <option value="luma">Luma Dream Machine</option>
-                      <option value="runway">Runway Gen-3 Alpha</option>
-                      <option value="haiper">Haiper AI</option>
-                      <option value="sora">OpenAI Sora</option>
-                      <option value="kling">Kling AI</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[10px] items-center gap-1.5 flex font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-2">
-                      <span className="bg-blue-400/20 text-blue-600 dark:text-blue-400 w-4 h-4 flex items-center justify-center rounded-full text-[9px]">2</span>
-                      共通モーション・スタイル
-                    </label>
-                    <textarea
-                      value={videoPromptStyle}
-                      onChange={(e) => setVideoPromptStyle(e.target.value)}
-                      placeholder="例: smooth motion, high fps, cinematic pan... (全カットに共通して追加する動画の動きやスタイルのベース指定)"
-                      className="w-full h-16 bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg p-2.5 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-blue-500/50 transition-colors custom-scrollbar resize-y"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] items-center gap-1.5 flex font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-2">
-                      <span className="bg-cyan-400/20 text-cyan-600 dark:text-cyan-400 w-4 h-4 flex items-center justify-center rounded-full text-[9px]">3</span>
-                      ネガティブプロンプト
-                    </label>
-                    <textarea
-                      value={videoPromptNegative}
-                      onChange={(e) => setVideoPromptNegative(e.target.value)}
-                      placeholder="例: jerky movement, morphing, deformed... (生成してほしくない要素・状態)"
-                      className="w-full h-16 bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg p-2.5 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50 transition-colors custom-scrollbar resize-y"
-                    />
-                  </div>
-                  <div className="flex justify-end pt-2">
-                    <button
-                      onClick={() => {
-                        saveVideoPrompts();
-                        setVideoPromptPanelOpen(false);
-                      }}
-                      className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white text-[10px] font-bold rounded-lg transition-colors shadow-md shadow-indigo-500/20"
-                    >
-                      保存して閉じる
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
 
-
-
-              </div>
-              
               {/* Right Column: Character & Stage Settings */}
               <div className="lg:col-span-5 xl:col-span-4 flex flex-col gap-6 sticky top-24">
                 {/* Character Status (compact) */}
@@ -1451,14 +2893,14 @@ JSON配列形式で出力してください。`
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-3">
                       <div className="w-1 h-5 rounded-full bg-gradient-to-b from-green-400 to-emerald-500"></div>
-                      <h2 className="text-[#333333] dark:text-gray-200 font-semibold text-sm">要素固定</h2>
+                      <h2 className="text-[#333333] dark:text-gray-200 font-semibold text-sm">背景</h2>
                     </div>
                     <div className="flex items-center gap-2">
                        <button
                          onClick={handleGenerateFixedElements}
                          disabled={isGeneratingFixed || !extractedPdfText}
                          className={`px-3 py-1.5 text-[10px] sm:text-xs font-bold rounded-lg transition-colors flex items-center gap-1 ${
-                           isGeneratingFixed 
+                           isGeneratingFixed
                              ? 'bg-gray-100 text-gray-400 cursor-not-allowed dark:bg-white/5'
                              : !extractedPdfText
                              ? 'bg-emerald-50 text-emerald-300 border border-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-500/50 cursor-not-allowed'
@@ -1466,8 +2908,8 @@ JSON配列形式で出力してください。`
                          }`}
                          title={!extractedPdfText ? "PDFをアップロードしてください" : ""}
                        >
-                         {isGeneratingFixed ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-                         {isGeneratingFixed ? "生成中..." : "生成する"}
+                         {isGeneratingFixed ? <Loader2 size={12} className="animate-spin" /> : stagePrompt ? <RefreshCw size={12} /> : <Sparkles size={12} />}
+                         {isGeneratingFixed ? "生成中..." : stagePrompt ? "再生成" : "生成する"}
                        </button>
 
                       <div className="relative" ref={fixedPanelRef}>
@@ -1480,10 +2922,10 @@ JSON配列形式で出力してください。`
                         {fixedPanelOpen && (
                           <div className="absolute top-full right-0 mt-3 w-[400px] bg-white dark:bg-[#16161e] border border-[#E0E0E0] dark:border-white/10 rounded-2xl shadow-2xl dark:shadow-emerald-500/5 p-5 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
                             <h3 className="text-[#333333] dark:text-gray-200 font-semibold text-xs mb-2">
-                              要素固定メタプロンプト
+                              背景メタプロンプト
                             </h3>
                             <p className="text-[10px] text-[#78909C] mb-3 leading-relaxed">
-                              画像生成時に一貫して適用する、背景やトーンなどを決定するためのAIへの司令です。
+                              画像生成時に一貫して適用する、背景やトーンなどを決定するためのAI指示です。
                             </p>
                             <textarea
                               value={fixedElementMetaPrompt}
@@ -1507,7 +2949,7 @@ JSON配列形式で出力してください。`
                                 <button
                                   onClick={() => {
                                     localStorage.setItem('snafty_fixed_meta_prompt', fixedElementMetaPrompt);
-                                    alert('要素固定メタプロンプトを保存しました。');
+                                    alert('背景メタプロンプトを保存しました。');
                                     setFixedPanelOpen(false);
                                   }}
                                   className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-[10px] font-bold rounded-lg transition-colors"
@@ -1527,116 +2969,233 @@ JSON配列形式で出力してください。`
                     placeholder="例: tokyo street, cyberpunk city, interior of a cafe... (動画全体の舞台や背景の指定。自動生成された結果がここにセットされます)"
                     className="w-full h-16 bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg p-2.5 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-emerald-500/50 transition-colors custom-scrollbar resize-y"
                   />
+
+                  {/* シーンごとの背景画像 */}
+                  {cuts.length > 0 && stagePrompt && (
+                    <div className="mt-4 pt-4 border-t border-gray-200 dark:border-white/10">
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-[10px] font-bold text-[#555] dark:text-gray-400 uppercase tracking-wider">
+                          シーン別背景画像
+                        </h3>
+                        <div className="flex items-center gap-2">
+                          {cuts.filter(c => c.enabled && c.backgroundImageUrl).length > 0 && (
+                            <button
+                              onClick={downloadAllBackgrounds}
+                              className="flex items-center gap-1 px-2 py-1 rounded text-[9px] font-bold transition-all bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400"
+                            >
+                              <Download size={10} />
+                              全てDL
+                            </button>
+                          )}
+                          <button
+                            onClick={generateAllBackgrounds}
+                            disabled={cuts.some(c => c.isGeneratingBackground)}
+                            className={`flex items-center gap-1 px-2 py-1 rounded text-[9px] font-bold transition-all ${
+                              cuts.some(c => c.isGeneratingBackground)
+                                ? 'bg-gray-100 dark:bg-white/5 text-gray-400 cursor-wait'
+                                : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                            }`}
+                          >
+                            <Sparkles size={10} />
+                            全シーン一括生成
+                          </button>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-4 gap-2">
+                        {cuts.filter(c => c.enabled).map((cut, index) => (
+                          <div key={cut.id} className="relative group">
+                            <div className="aspect-video rounded-lg overflow-hidden border border-gray-200 dark:border-white/10 bg-gray-100 dark:bg-white/5">
+                              {cut.backgroundImageUrl ? (
+                                <img
+                                  src={cut.backgroundImageUrl}
+                                  alt={`背景 ${index + 1}`}
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center">
+                                  <ImageIcon size={16} className="text-gray-300 dark:text-gray-600" />
+                                </div>
+                              )}
+                              {cut.isGeneratingBackground && (
+                                <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                                  <Loader2 size={16} className="text-white animate-spin" />
+                                </div>
+                              )}
+                              {/* Hover overlay */}
+                              {!cut.isGeneratingBackground && (
+                                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
+                                  {cut.backgroundImageUrl && (
+                                    <>
+                                      <button
+                                        onClick={() => setLightboxImage({ url: cut.backgroundImageUrl!, title: `${cut.title} - 背景` })}
+                                        className="p-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white transition-colors"
+                                        title="拡大表示"
+                                      >
+                                        <Maximize2 size={12} />
+                                      </button>
+                                      <button
+                                        onClick={() => downloadBackgroundImage(cut.backgroundImageUrl!, cut.title)}
+                                        className="p-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white transition-colors"
+                                        title="ダウンロード"
+                                      >
+                                        <Download size={12} />
+                                      </button>
+                                    </>
+                                  )}
+                                  <label
+                                    className="p-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white transition-colors cursor-pointer"
+                                    title="画像をアップロード"
+                                  >
+                                    <Upload size={12} />
+                                    <input
+                                      type="file"
+                                      accept="image/*"
+                                      className="hidden"
+                                      onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        if (file) {
+                                          const url = URL.createObjectURL(file);
+                                          setCuts(prev => prev.map(c => c.id === cut.id ? { ...c, backgroundImageUrl: url } : c));
+                                        }
+                                        e.target.value = '';
+                                      }}
+                                    />
+                                  </label>
+                                  <button
+                                    onClick={() => generateBackgroundForCut(cut.id)}
+                                    className="p-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white transition-colors"
+                                    title="背景を再生成"
+                                  >
+                                    <RefreshCw size={12} />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                            <p className="text-[8px] text-center text-[#78909C] dark:text-gray-500 mt-1 truncate">
+                              {index + 1}. {cut.title}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                {/* Still Image Prompt Settings */}
+                {/* Generation Settings (Video/Still Toggle) */}
                 <div className="glass rounded-2xl p-4 card-hover">
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-3">
-                      <div className="w-1 h-5 rounded-full bg-gradient-to-b from-orange-400 to-red-500"></div>
-                      <h2 className="text-[#333333] dark:text-gray-200 font-semibold text-sm">静止画プロンプト設定</h2>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setStillMetaPanelOpen(!stillMetaPanelOpen)}
-                        className={`text-[10px] sm:text-xs font-bold transition-colors flex items-center gap-1 ${
-                          stillMetaPanelOpen ? 'text-gray-600 dark:text-gray-300' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'
-                        }`}
-                      >
-                        プロンプト指示設定
-                        <ChevronDown size={12} className={`transition-transform duration-200 ${stillMetaPanelOpen ? 'rotate-180' : ''}`} />
-                      </button>
-                      <button
-                        onClick={() => setStillPromptPanelOpen(!stillPromptPanelOpen)}
-                        className="text-[10px] sm:text-xs text-orange-600 dark:text-orange-400 font-bold hover:text-orange-700 dark:hover:text-orange-300 transition-colors flex items-center gap-1"
-                      >
-                        設定を開く
-                        <ChevronDown size={12} className={`transition-transform duration-200 ${stillPromptPanelOpen ? 'rotate-180' : ''}`} />
-                      </button>
+                      <div className={`w-1 h-5 rounded-full bg-gradient-to-b ${generationSettingsTab === 'video' ? 'from-blue-400 to-indigo-500' : 'from-orange-400 to-red-500'}`}></div>
+                      <div className="flex bg-gray-100 dark:bg-white/5 rounded-lg p-0.5">
+                        <button
+                          onClick={() => setGenerationSettingsTab('still')}
+                          className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-all ${
+                            generationSettingsTab === 'still'
+                              ? 'bg-white dark:bg-white/10 text-orange-600 dark:text-orange-400 shadow-sm'
+                              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                          }`}
+                        >
+                          静止画設定
+                        </button>
+                        <button
+                          onClick={() => setGenerationSettingsTab('video')}
+                          className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-all ${
+                            generationSettingsTab === 'video'
+                              ? 'bg-white dark:bg-white/10 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                          }`}
+                        >
+                          動画設定
+                        </button>
+                      </div>
                     </div>
                   </div>
 
-                  {stillMetaPanelOpen && (
-                    <div className="space-y-3 animate-in fade-in slide-in-from-top-2 duration-200 pt-3 border-t border-gray-200 dark:border-white/10 mt-2 mb-4 bg-gray-50 dark:bg-white/5 p-3 rounded-lg">
+                  {/* 静止画設定 */}
+                  {generationSettingsTab === 'still' && (
+                    <div className="space-y-3">
                       <div>
-                        <label className="text-[10px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-2 block">
-                          [AI用] 静止画プロンプト指示 (メタプロンプト)
+                        <label className="text-[9px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">
+                          <span className="text-gray-400">AI指示</span> メタプロンプト
                         </label>
                         <textarea
                           value={stillImageMetaPrompt}
                           onChange={(e) => setStillImageMetaPrompt(e.target.value)}
-                          placeholder="AIに対するスタイル指示のルールなどを入力してください"
-                          className="w-full h-16 bg-white dark:bg-[#1a1a24] border border-gray-200 dark:border-white/10 rounded-lg p-2.5 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-gray-500/50 transition-colors custom-scrollbar resize-y"
+                          placeholder="静止画生成AIへの指示ルールを設定..."
+                          className="w-full h-24 bg-yellow-50 dark:bg-yellow-500/5 border border-yellow-200 dark:border-yellow-500/20 rounded-lg p-2 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-yellow-500/50 transition-colors custom-scrollbar resize-y"
                         />
                       </div>
-                      <div className="flex justify-end">
-                        <button
-                          onClick={() => {
-                            saveStillMetaPrompt();
-                            setStillMetaPanelOpen(false);
-                          }}
-                          className="px-3 py-1.5 bg-gray-200 hover:bg-gray-300 text-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700 dark:text-gray-200 text-[10px] font-bold rounded-lg transition-colors"
-                        >
-                          指示を保存して閉じる
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {stillPromptPanelOpen && (
-                    <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-200 pt-3 border-t border-gray-200 dark:border-white/10 mt-2">
                       <div>
-                        <label className="text-[10px] items-center gap-1.5 flex font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-2">
-                          <span className="bg-yellow-400/20 text-yellow-600 dark:text-yellow-400 w-4 h-4 flex items-center justify-center rounded-full text-[9px]">1</span>
-                          画像スタイル・品質
+                        <label className="text-[9px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">
+                          <span className="text-orange-500">出力</span> 生成プロンプト
                         </label>
                         <textarea
                           value={stillImageStyle}
                           onChange={(e) => setStillImageStyle(e.target.value)}
-                          placeholder="例: masterpiece, 8k resolution, cinematic lighting... (全カットに共通して追加するスタイルのベース指定)"
-                          className="w-full h-16 bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg p-2.5 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-yellow-500/50 transition-colors custom-scrollbar resize-y"
+                          placeholder="メタプロンプトを元に生成されるプロンプト（手動編集も可）"
+                          className="w-full h-16 bg-orange-50 dark:bg-orange-500/5 border border-orange-200 dark:border-orange-500/20 rounded-lg p-2 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-orange-500/50 transition-colors custom-scrollbar resize-y"
                         />
                       </div>
-                      <div>
-                        <label className="text-[10px] items-center gap-1.5 flex font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-2">
-                          <span className="bg-purple-400/20 text-purple-600 dark:text-purple-400 w-4 h-4 flex items-center justify-center rounded-full text-[9px]">2</span>
-                          ネガティブプロンプト
-                        </label>
-                        <textarea
-                          value={stillImageNegative}
-                          onChange={(e) => setStillImageNegative(e.target.value)}
-                          placeholder="例: low quality, blurry, mutated hands... (生成してほしくない要素・状態)"
-                          className="w-full h-16 bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg p-2.5 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50 transition-colors custom-scrollbar resize-y"
-                        />
-                      </div>
-                      <div className="flex justify-end pt-2">
+                      <div className="flex justify-end">
                         <button
-                          onClick={() => {
-                            saveStillPrompts();
-                            setStillPromptPanelOpen(false);
-                          }}
-                          className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-[10px] font-bold rounded-lg transition-colors shadow-md shadow-orange-500/20"
+                          onClick={saveStillPrompts}
+                          className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white text-[9px] font-bold rounded-lg transition-colors"
                         >
-                          保存して閉じる
+                          保存
                         </button>
                       </div>
                     </div>
                   )}
 
-                  {/* 現在の英語プロンプト表示 */}
-                  <div className="mt-3 pt-3 border-t border-gray-200 dark:border-white/10">
-                    <label className="text-[9px] font-semibold text-[#78909C] dark:text-gray-500 uppercase tracking-wider mb-1.5 block">
-                      現在のプロンプト (English)
-                    </label>
-                    <div className="bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg p-2.5 text-[10px] text-[#555] dark:text-gray-400 font-mono leading-relaxed break-all max-h-24 overflow-y-auto custom-scrollbar">
-                      {stillImageStyle || <span className="text-gray-400 dark:text-gray-600 italic">未設定</span>}
-                      {stillImageNegative && (
-                        <div className="mt-2 pt-2 border-t border-gray-200 dark:border-white/5">
-                          <span className="text-red-400 dark:text-red-500">Negative:</span> {stillImageNegative}
-                        </div>
-                      )}
+                  {/* 動画設定 */}
+                  {generationSettingsTab === 'video' && (
+                    <div className="space-y-3">
+                      <div>
+                        <label className="text-[9px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">
+                          <span className="text-gray-400">AI指示</span> メタプロンプト
+                        </label>
+                        <textarea
+                          value={videoMetaPrompt}
+                          onChange={(e) => setVideoMetaPrompt(e.target.value)}
+                          placeholder="動画生成AIへの指示ルールを設定..."
+                          className="w-full h-12 bg-blue-50 dark:bg-blue-500/5 border border-blue-200 dark:border-blue-500/20 rounded-lg p-2 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-blue-500/50 transition-colors custom-scrollbar resize-y"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[9px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">
+                          <span className="text-indigo-500">出力</span> 生成プロンプト
+                        </label>
+                        <textarea
+                          value={videoPromptStyle}
+                          onChange={(e) => setVideoPromptStyle(e.target.value)}
+                          placeholder="メタプロンプトを元に生成されるプロンプト（手動編集も可）"
+                          className="w-full h-16 bg-indigo-50 dark:bg-indigo-500/5 border border-indigo-200 dark:border-indigo-500/20 rounded-lg p-2 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-indigo-500/50 transition-colors custom-scrollbar resize-y"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[9px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">
+                          使用モデル
+                        </label>
+                        <select
+                          value={videoGenModel}
+                          onChange={(e) => setVideoGenModel(e.target.value)}
+                          className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg p-2 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-indigo-500/50 transition-colors"
+                        >
+                          <option value="kling">Kling AI 2.6</option>
+                          <option value="luma">Luma Dream Machine</option>
+                          <option value="runway">Runway Gen-3</option>
+                        </select>
+                      </div>
+                      <div className="flex justify-end">
+                        <button
+                          onClick={saveVideoPrompts}
+                          className="px-3 py-1.5 bg-indigo-500 hover:bg-indigo-600 text-white text-[9px] font-bold rounded-lg transition-colors"
+                        >
+                          保存
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
 
                 {/* Generate Button */}
@@ -1708,6 +3267,55 @@ JSON配列形式で出力してください。`
         aiModel={aiModel}
         existingCharacterFile={humanFile}
       />
+
+      {/* Image Lightbox Modal */}
+      {lightboxImage && (
+        <div
+          className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center p-4 animate-in fade-in duration-200"
+          onClick={() => setLightboxImage(null)}
+        >
+          {/* Close button */}
+          <button
+            onClick={() => setLightboxImage(null)}
+            className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+          >
+            <X size={24} />
+          </button>
+
+          {/* Title */}
+          <div className="absolute top-4 left-4 text-white">
+            <h3 className="text-lg font-bold">{lightboxImage.title}</h3>
+          </div>
+
+          {/* Image */}
+          <div
+            className="max-w-[90vw] max-h-[85vh] relative"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={lightboxImage.url}
+              alt={lightboxImage.title}
+              className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl"
+            />
+          </div>
+
+          {/* Download button */}
+          <a
+            href={lightboxImage.url}
+            download={`${lightboxImage.title}.png`}
+            onClick={(e) => e.stopPropagation()}
+            className="absolute bottom-4 right-4 flex items-center gap-2 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"
+          >
+            <Upload size={16} className="rotate-180" />
+            <span className="text-sm font-medium">ダウンロード</span>
+          </a>
+
+          {/* Instructions */}
+          <p className="absolute bottom-4 left-4 text-white/50 text-sm">
+            クリックで閉じる / ESCキー
+          </p>
+        </div>
+      )}
     </div>
   );
 };

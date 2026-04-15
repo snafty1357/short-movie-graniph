@@ -36,7 +36,7 @@ export default async function handler(req, res) {
     }
 
     const requestBody = {
-      model: model || 'claude-sonnet-4-20250514',
+      model: model || 'claude-3-5-sonnet-20241022',
       max_tokens: max_tokens || 4000,
       temperature: temperature || 0.7,
       messages: claudeMessages,

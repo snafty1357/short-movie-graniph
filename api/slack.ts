@@ -1,6 +1,10 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Anthropic from '@anthropic-ai/sdk';
 
+export const config = {
+  maxDuration: 60,
+};
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // ① POSTリクエストのみ受け付ける
   if (req.method !== 'POST') {

@@ -7,6 +7,7 @@
  */
 
 import * as pdfjsLib from 'pdfjs-dist';
+import { getProviderFromModelId, getApiModelName } from './aiModelConfig';
 
 // PDF.js ワーカー設定（Vite でバンドル済み ESM ワーカーを使用）
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -175,12 +176,38 @@ export async function extractTextFromPdf(file: File): Promise<string> {
 
 export type AiModelType = 'openai' | 'gemini' | 'claude';
 
+// モデルIDからエンドポイントとモデル名を取得
+function getModelConfig(modelIdOrType: string): { endpoint: string; modelName: string } {
+  console.log('[getModelConfig] Input:', modelIdOrType);
+
+  // 従来のタイプ（openai, gemini, claude）かどうかをチェック
+  const legacyTypes = ['openai', 'gemini', 'claude'];
+  if (legacyTypes.includes(modelIdOrType)) {
+    const aiModel = modelIdOrType as AiModelType;
+    const result = {
+      endpoint: `/api/${aiModel}`,
+      modelName: aiModel === 'openai' ? 'gpt-4o' : aiModel === 'gemini' ? 'gemini-1.5-flash' : 'claude-3-5-sonnet-20241022',
+    };
+    console.log('[getModelConfig] Legacy type result:', result);
+    return result;
+  }
+  // 新しいモデルID
+  const provider = getProviderFromModelId(modelIdOrType);
+  const apiModelName = getApiModelName(modelIdOrType);
+  const result = {
+    endpoint: `/api/${provider}`,
+    modelName: apiModelName,
+  };
+  console.log('[getModelConfig] New model ID result:', result);
+  return result;
+}
+
 export async function generateCutComposition(
   storyText: string,
   regulation: string,
   metaPrompt: string,
   cutCount?: number,
-  aiModel: AiModelType = 'openai'
+  aiModelOrId: AiModelType | string = 'openai'
 ): Promise<StoryPdfResult> {
   const systemMessage = metaPrompt;
 
@@ -194,24 +221,30 @@ ${storyText}
 上記のストーリーを読み解き、レギュレーションに従ってカット割り構成表をJSON配列で出力してください。
 JSONのみを返してください。説明文は不要です。`;
 
-  const endpoint = `/api/${aiModel}`;
-  const modelName = aiModel === 'openai' ? 'gpt-4o' : aiModel === 'gemini' ? 'gemini-2.5-flash' : 'claude-sonnet-4-20250514';
+  const { endpoint, modelName } = getModelConfig(aiModelOrId);
   console.log('[generateCutComposition] Endpoint:', endpoint);
   console.log('[generateCutComposition] Model:', modelName);
+  console.log('[generateCutComposition] Sending request...');
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: modelName,
-      messages: [
-        { role: 'system', content: systemMessage },
-        { role: 'user', content: userMessage },
-      ],
-      max_tokens: 4000,
-      temperature: 0.6,
-    }),
-  });
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: modelName,
+        messages: [
+          { role: 'system', content: systemMessage },
+          { role: 'user', content: userMessage },
+        ],
+        max_tokens: 2500,
+        temperature: 0.6,
+      }),
+    });
+  } catch (fetchError: any) {
+    console.error('[generateCutComposition] Fetch error:', fetchError);
+    throw new Error(`ネットワークエラー: ${fetchError.message}`);
+  }
 
   console.log('[generateCutComposition] Response status:', response.status);
 
@@ -264,6 +297,7 @@ export function compositionRowToCutItem(row: CutCompositionRow, index: number) {
     row.fromStart && `Starting state: ${row.fromStart}`,
     row.toEnd && `Ending state: ${row.toEnd}`,
     row.walkPosition && `Position: ${row.walkPosition}`,
+    row.moveDistance && `Move distance: ${row.moveDistance}`,
     row.background && `Background: ${row.background}`,
     row.productEmphasis && `Focusing on product: ${row.productEmphasis}`,
   ].filter(Boolean).join(', ');
@@ -286,6 +320,16 @@ export function compositionRowToCutItem(row: CutCompositionRow, index: number) {
     showMain: true,
     showSub: row.ipPresence === true,
     ipPrompt: ipPromptParts || undefined,
+    // 詳細フィールドを保存（編集可能）
+    expression: row.expression || '',
+    gaze: row.gaze || '',
+    pose: row.pose || '',
+    walkingStyle: '', // AI生成には含まれないので空文字で初期化
+    walkPosition: row.walkPosition || '',
+    moveDistance: row.moveDistance || '',
+    action: row.centralEvent || '',
+    background: row.background || '',
+    productEmphasis: row.productEmphasis || '',
   };
 }
 
@@ -303,7 +347,7 @@ export async function generateFixedElements(
   regulation: string,
   cutMetaPrompt: string,
   fixedElementMetaPrompt: string,
-  aiModel: AiModelType = 'openai'
+  aiModelOrId: AiModelType | string = 'openai'
 ): Promise<string> {
   const systemMessage = fixedElementMetaPrompt;
 
@@ -319,12 +363,12 @@ ${regulation}
 
 上記の情報を元に、映像全体で固定すべき環境・背景の英語プロンプトを出力してください。結果は英語のみで出力すること。`;
 
-  const endpoint = `/api/${aiModel}`;
+  const { endpoint, modelName } = getModelConfig(aiModelOrId);
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: aiModel === 'openai' ? 'gpt-4o' : aiModel === 'gemini' ? 'gemini-2.5-flash' : 'claude-sonnet-4-20250514',
+      model: modelName,
       messages: [
         { role: 'system', content: systemMessage },
         { role: 'user', content: userMessage },
