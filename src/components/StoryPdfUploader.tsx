@@ -24,7 +24,7 @@ interface StoryPdfUploaderProps {
 }
 
 type Step = 'idle' | 'extracting' | 'extracted' | 'generating' | 'done' | 'error';
-type InputMode = 'pdf' | 'json';
+type InputMode = 'pdf' | 'json' | 'camera';
 
 const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
   onCutsGenerated,
@@ -64,7 +64,6 @@ const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
   const [depthOfField, setDepthOfField] = useState('medium');
   const [imageQuality, setImageQuality] = useState('high');
   const [colorGrade, setColorGrade] = useState('natural');
-  const [showCameraSettings, setShowCameraSettings] = useState(true);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
@@ -465,36 +464,110 @@ const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
 
       {/* ── メインコンテンツ ── */}
       <div className="p-4">
-        {/* Step: Idle — 入力モード選択 + アップロード / JSON入力 */}
+        {/* Step: Idle — 入力モード選択 + アップロード / JSON入力 / 撮影設定 */}
         {step === 'idle' && (
-          <div className="flex gap-4">
-            {/* 左側: カメラ・画質設定パネル */}
-            <div className="w-56 flex-shrink-0">
-              <div className="bg-gradient-to-br from-slate-50 to-gray-50 dark:from-white/[0.03] dark:to-white/[0.01] border border-[#E0E0E0] dark:border-white/10 rounded-xl p-3 space-y-3">
-                {/* ヘッダー */}
-                <button
-                  onClick={() => setShowCameraSettings(!showCameraSettings)}
-                  className="flex items-center justify-between w-full"
-                >
-                  <div className="flex items-center gap-2">
-                    <Camera size={14} className="text-cyan-500" />
-                    <span className="text-[10px] font-bold text-[#333] dark:text-gray-200 uppercase tracking-wider">撮影設定</span>
-                  </div>
-                  <ChevronDown size={12} className={`text-gray-400 transition-transform ${showCameraSettings ? 'rotate-180' : ''}`} />
-                </button>
+          <div className="space-y-3">
+            {/* タブ切り替え（3タブ） */}
+            <div className="flex rounded-lg border border-[#E0E0E0] dark:border-white/10 overflow-hidden">
+              <button
+                onClick={() => setInputMode('pdf')}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-bold transition-all ${
+                  inputMode === 'pdf'
+                    ? 'bg-violet-500 text-white'
+                    : 'bg-white dark:bg-white/5 text-[#78909C] hover:text-[#333] dark:hover:text-white hover:bg-gray-50 dark:hover:bg-white/10'
+                }`}
+              >
+                <FileText size={13} />
+                PDF
+              </button>
+              <button
+                onClick={() => setInputMode('json')}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-bold transition-all ${
+                  inputMode === 'json'
+                    ? 'bg-violet-500 text-white'
+                    : 'bg-white dark:bg-white/5 text-[#78909C] hover:text-[#333] dark:hover:text-white hover:bg-gray-50 dark:hover:bg-white/10'
+                }`}
+              >
+                <Code2 size={13} />
+                JSON
+              </button>
+              <button
+                onClick={() => setInputMode('camera')}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-bold transition-all ${
+                  inputMode === 'camera'
+                    ? 'bg-cyan-500 text-white'
+                    : 'bg-white dark:bg-white/5 text-[#78909C] hover:text-[#333] dark:hover:text-white hover:bg-gray-50 dark:hover:bg-white/10'
+                }`}
+              >
+                <Camera size={13} />
+                撮影設定
+              </button>
+            </div>
 
-                {showCameraSettings && (
-                  <div className="space-y-3 pt-2 border-t border-gray-200 dark:border-white/10">
+            {/* PDF モード */}
+            {inputMode === 'pdf' && (
+              <label className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-violet-300 dark:border-violet-500/30 rounded-xl hover:bg-violet-50 dark:hover:bg-violet-500/5 transition-all cursor-pointer group">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500/10 to-fuchsia-500/10 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                  <FileText size={24} className="text-violet-500 dark:text-violet-400" />
+                </div>
+                <span className="text-sm font-bold text-[#333] dark:text-gray-200 mb-1">ストーリーPDFをドロップまたは選択</span>
+                <span className="text-[10px] text-[#78909C] dark:text-gray-500">簡易ストーリー、シナリオ、プロット等のPDF</span>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                />
+              </label>
+            )}
+
+            {/* JSON モード */}
+            {inputMode === 'json' && (
+              <div className="space-y-3">
+                <textarea
+                  value={jsonInput}
+                  onChange={e => { setJsonInput(e.target.value); setJsonError(null); }}
+                  placeholder={`カット割りJSONを貼り付けてください。例:\n[\n  {\n    "cutNumber": 1,\n    "duration": "2.5秒",\n    "role": "状況把握",\n    "centralEvent": "主人公が街を歩いている",\n    "camera": "ミドルロング / 正面",\n    "expression": "穏やか",\n    "background": "都会の街並み",\n    "ipPresence": false\n  }\n]`}
+                  className="w-full h-48 bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl p-3 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-violet-500/50 transition-colors custom-scrollbar resize-y font-mono leading-relaxed placeholder:text-[#B0BEC5] dark:placeholder:text-gray-600"
+                />
+                {jsonError && (
+                  <div className="flex items-center gap-2 p-2.5 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-lg">
+                    <AlertCircle size={13} className="text-red-500 flex-shrink-0" />
+                    <p className="text-[10px] text-red-600 dark:text-red-400 font-medium">{jsonError}</p>
+                  </div>
+                )}
+                <button
+                  onClick={handleJsonImport}
+                  disabled={!jsonInput.trim()}
+                  className={`w-full py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all duration-300 ${
+                    jsonInput.trim()
+                      ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-lg shadow-violet-500/25 hover:shadow-violet-500/40 hover:scale-[1.01]'
+                      : 'bg-gray-200 dark:bg-white/10 text-[#B0BEC5] dark:text-gray-600 cursor-not-allowed'
+                  }`}
+                >
+                  <Code2 size={16} />
+                  JSONからカット割りを取り込む
+                </button>
+              </div>
+            )}
+
+            {/* 撮影設定モード */}
+            {inputMode === 'camera' && (
+              <div className="bg-gradient-to-br from-slate-50 to-gray-50 dark:from-white/[0.03] dark:to-white/[0.01] border border-[#E0E0E0] dark:border-white/10 rounded-xl p-4 space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  {/* 左列 */}
+                  <div className="space-y-4">
                     {/* カメラタイプ */}
                     <div>
-                      <label className="text-[9px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block flex items-center gap-1">
-                        <Camera size={10} />
+                      <label className="text-[10px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block flex items-center gap-1">
+                        <Camera size={11} />
                         カメラタイプ
                       </label>
                       <select
                         value={cameraType}
                         onChange={(e) => setCameraType(e.target.value)}
-                        className="w-full bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg px-2 py-1.5 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50"
+                        className="w-full bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50"
                       >
                         <option value="cinematic">シネマティック</option>
                         <option value="documentary">ドキュメンタリー</option>
@@ -506,18 +579,18 @@ const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
 
                     {/* レンズ */}
                     <div>
-                      <label className="text-[9px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block flex items-center gap-1">
-                        <Aperture size={10} />
+                      <label className="text-[10px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block flex items-center gap-1">
+                        <Aperture size={11} />
                         レンズ
                       </label>
-                      <div className="flex flex-wrap gap-1">
+                      <div className="flex flex-wrap gap-1.5">
                         {['24mm', '35mm', '50mm', '85mm', '135mm'].map(lens => (
                           <button
                             key={lens}
                             onClick={() => setLensType(lens)}
-                            className={`px-2 py-1 rounded text-[9px] font-bold transition-all ${
+                            className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all ${
                               lensType === lens
-                                ? 'bg-cyan-500 text-white'
+                                ? 'bg-cyan-500 text-white shadow-sm'
                                 : 'bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 text-[#78909C] hover:text-[#333] dark:hover:text-white'
                             }`}
                           >
@@ -529,57 +602,60 @@ const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
 
                     {/* 被写界深度（ボケ） */}
                     <div>
-                      <label className="text-[9px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block flex items-center gap-1">
-                        <Focus size={10} />
+                      <label className="text-[10px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block flex items-center gap-1">
+                        <Focus size={11} />
                         被写界深度（ボケ）
                       </label>
-                      <div className="flex gap-1">
+                      <div className="flex gap-1.5">
                         {[
-                          { value: 'shallow', label: '浅い', desc: 'f/1.4' },
+                          { value: 'shallow', label: '浅い', desc: 'f/1.4 強ボケ' },
                           { value: 'medium', label: '中', desc: 'f/2.8' },
-                          { value: 'deep', label: '深い', desc: 'f/8' },
+                          { value: 'deep', label: '深い', desc: 'f/8 全体鮮明' },
                         ].map(dof => (
                           <button
                             key={dof.value}
                             onClick={() => setDepthOfField(dof.value)}
-                            className={`flex-1 px-2 py-1.5 rounded text-center transition-all ${
+                            className={`flex-1 px-2 py-2 rounded-lg text-center transition-all ${
                               depthOfField === dof.value
-                                ? 'bg-cyan-500 text-white'
+                                ? 'bg-cyan-500 text-white shadow-sm'
                                 : 'bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 text-[#78909C] hover:text-[#333] dark:hover:text-white'
                             }`}
                           >
-                            <div className="text-[9px] font-bold">{dof.label}</div>
+                            <div className="text-[10px] font-bold">{dof.label}</div>
                             <div className="text-[8px] opacity-70">{dof.desc}</div>
                           </button>
                         ))}
                       </div>
                     </div>
+                  </div>
 
+                  {/* 右列 */}
+                  <div className="space-y-4">
                     {/* 画質 */}
                     <div>
-                      <label className="text-[9px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">
+                      <label className="text-[10px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">
                         画質
                       </label>
                       <select
                         value={imageQuality}
                         onChange={(e) => setImageQuality(e.target.value)}
-                        className="w-full bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg px-2 py-1.5 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50"
+                        className="w-full bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50"
                       >
-                        <option value="ultra">Ultra (8K)</option>
-                        <option value="high">High (4K)</option>
+                        <option value="ultra">Ultra (8K) - 最高品質</option>
+                        <option value="high">High (4K) - 高品質</option>
                         <option value="standard">Standard (HD)</option>
                       </select>
                     </div>
 
                     {/* カラーグレード */}
                     <div>
-                      <label className="text-[9px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">
+                      <label className="text-[10px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">
                         カラーグレード
                       </label>
                       <select
                         value={colorGrade}
                         onChange={(e) => setColorGrade(e.target.value)}
-                        className="w-full bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg px-2 py-1.5 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50"
+                        className="w-full bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50"
                       >
                         <option value="natural">ナチュラル</option>
                         <option value="cinematic">シネマティック</option>
@@ -590,95 +666,19 @@ const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
                       </select>
                     </div>
 
-                    {/* プレビュー情報 */}
-                    <div className="pt-2 border-t border-gray-200 dark:border-white/10">
-                      <div className="text-[8px] text-[#78909C] dark:text-gray-500 space-y-0.5">
-                        <p>📷 {cameraType} / {lensType}</p>
-                        <p>🎨 {colorGrade} / {imageQuality}</p>
-                        <p>✨ ボケ: {depthOfField === 'shallow' ? '強' : depthOfField === 'medium' ? '中' : '弱'}</p>
+                    {/* 現在の設定サマリー */}
+                    <div className="bg-cyan-50 dark:bg-cyan-500/10 border border-cyan-200 dark:border-cyan-500/20 rounded-xl p-3">
+                      <div className="text-[10px] font-bold text-cyan-600 dark:text-cyan-400 mb-2">現在の設定</div>
+                      <div className="text-[10px] text-cyan-700 dark:text-cyan-300 space-y-1">
+                        <p>📷 {cameraType === 'cinematic' ? 'シネマティック' : cameraType === 'documentary' ? 'ドキュメンタリー' : cameraType === 'fashion' ? 'ファッション' : cameraType === 'portrait' ? 'ポートレート' : 'コマーシャル'} / {lensType}</p>
+                        <p>🎨 {colorGrade === 'natural' ? 'ナチュラル' : colorGrade === 'cinematic' ? 'シネマティック' : colorGrade === 'vintage' ? 'ヴィンテージ' : colorGrade === 'highContrast' ? 'ハイコントラスト' : colorGrade === 'softPastel' ? 'ソフトパステル' : 'ムーディー'} / {imageQuality === 'ultra' ? '8K' : imageQuality === 'high' ? '4K' : 'HD'}</p>
+                        <p>✨ ボケ: {depthOfField === 'shallow' ? '強（f/1.4）' : depthOfField === 'medium' ? '中（f/2.8）' : '弱（f/8）'}</p>
                       </div>
                     </div>
                   </div>
-                )}
-              </div>
-            </div>
-
-            {/* 右側: PDFアップロード / JSON入力 */}
-            <div className="flex-1 space-y-3">
-              {/* タブ切り替え */}
-              <div className="flex rounded-lg border border-[#E0E0E0] dark:border-white/10 overflow-hidden">
-                <button
-                  onClick={() => setInputMode('pdf')}
-                  className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-bold transition-all ${
-                    inputMode === 'pdf'
-                      ? 'bg-violet-500 text-white'
-                      : 'bg-white dark:bg-white/5 text-[#78909C] hover:text-[#333] dark:hover:text-white hover:bg-gray-50 dark:hover:bg-white/10'
-                  }`}
-                >
-                  <FileText size={13} />
-                  PDF
-                </button>
-                <button
-                  onClick={() => setInputMode('json')}
-                  className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-bold transition-all ${
-                    inputMode === 'json'
-                      ? 'bg-violet-500 text-white'
-                      : 'bg-white dark:bg-white/5 text-[#78909C] hover:text-[#333] dark:hover:text-white hover:bg-gray-50 dark:hover:bg-white/10'
-                  }`}
-                >
-                  <Code2 size={13} />
-                  JSON
-                </button>
-              </div>
-
-              {/* PDF モード */}
-              {inputMode === 'pdf' && (
-                <label className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-violet-300 dark:border-violet-500/30 rounded-xl hover:bg-violet-50 dark:hover:bg-violet-500/5 transition-all cursor-pointer group">
-                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500/10 to-fuchsia-500/10 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-                    <FileText size={24} className="text-violet-500 dark:text-violet-400" />
-                  </div>
-                  <span className="text-sm font-bold text-[#333] dark:text-gray-200 mb-1">ストーリーPDFをドロップまたは選択</span>
-                  <span className="text-[10px] text-[#78909C] dark:text-gray-500">簡易ストーリー、シナリオ、プロット等のPDF</span>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".pdf"
-                    onChange={handleFileSelect}
-                    className="hidden"
-                  />
-                </label>
-              )}
-
-              {/* JSON モード */}
-              {inputMode === 'json' && (
-                <div className="space-y-3">
-                  <textarea
-                    value={jsonInput}
-                    onChange={e => { setJsonInput(e.target.value); setJsonError(null); }}
-                    placeholder={`カット割りJSONを貼り付けてください。例:\n[\n  {\n    "cutNumber": 1,\n    "duration": "2.5秒",\n    "role": "状況把握",\n    "centralEvent": "主人公が街を歩いている",\n    "camera": "ミドルロング / 正面",\n    "expression": "穏やか",\n    "background": "都会の街並み",\n    "ipPresence": false\n  }\n]`}
-                    className="w-full h-48 bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl p-3 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-violet-500/50 transition-colors custom-scrollbar resize-y font-mono leading-relaxed placeholder:text-[#B0BEC5] dark:placeholder:text-gray-600"
-                  />
-                  {jsonError && (
-                    <div className="flex items-center gap-2 p-2.5 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-lg">
-                      <AlertCircle size={13} className="text-red-500 flex-shrink-0" />
-                      <p className="text-[10px] text-red-600 dark:text-red-400 font-medium">{jsonError}</p>
-                    </div>
-                  )}
-                  <button
-                    onClick={handleJsonImport}
-                    disabled={!jsonInput.trim()}
-                    className={`w-full py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all duration-300 ${
-                      jsonInput.trim()
-                        ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-lg shadow-violet-500/25 hover:shadow-violet-500/40 hover:scale-[1.01]'
-                        : 'bg-gray-200 dark:bg-white/10 text-[#B0BEC5] dark:text-gray-600 cursor-not-allowed'
-                    }`}
-                  >
-                    <Code2 size={16} />
-                    JSONからカット割りを取り込む
-                  </button>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         )}
 
