@@ -58,14 +58,33 @@ async function falRequest(path: string, method: string = 'GET', body?: Record<st
   };
   if (body) {
     options.body = JSON.stringify(body);
+    console.log('[FalRequest] Sending request to:', path);
+    console.log('[FalRequest] Body keys:', Object.keys(body));
   }
 
-  const response = await fetch(url, options);
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error(errorData.detail || errorData.error || `API Error: ${response.status}`);
+  try {
+    const response = await fetch(url, options);
+    console.log('[FalRequest] Response status:', response.status);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[FalRequest] Error response:', errorText);
+      let errorData;
+      try {
+        errorData = JSON.parse(errorText);
+      } catch {
+        errorData = { error: errorText || 'Unknown error' };
+      }
+      throw new Error(errorData.detail || errorData.error || `API Error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log('[FalRequest] Success, keys:', Object.keys(data));
+    return data;
+  } catch (err) {
+    console.error('[FalRequest] Fetch error:', err);
+    throw err;
   }
-  return response.json();
 }
 
 /**

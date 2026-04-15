@@ -864,8 +864,11 @@ JSON配列形式で出力してください。`
       } : c));
 
     } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : '生成失敗';
       console.error(`Cut ${cutId} generation error:`, err);
-      setCuts(prev => prev.map(c => c.id === cutId ? { ...c, isGenerating: false, errorMessage: err instanceof Error ? err.message : '生成失敗' } : c));
+      console.error(`Cut ${cutId} error message:`, errorMsg);
+      alert(`画像生成エラー: ${errorMsg}`);
+      setCuts(prev => prev.map(c => c.id === cutId ? { ...c, isGenerating: false, errorMessage: errorMsg } : c));
     }
   };
 
