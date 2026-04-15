@@ -18,7 +18,7 @@ export interface CutItem {
   errorMessage?: string;
   backgroundImageUrl?: string; // シーン背景画像
   isGeneratingBackground?: boolean;
-  // 詳細フィールド（構成表編集用）
+  // 詳細フィールド（構成表編集用 - 画像用）
   expression?: string;        // 表情
   gaze?: string;              // 視線
   pose?: string;              // ポーズ
@@ -28,6 +28,15 @@ export interface CutItem {
   action?: string;            // アクション（中心事象）
   background?: string;        // 背景要素
   productEmphasis?: string;   // プロダクト強調部位
+  // 動画用フィールド
+  duration?: string;          // 尺（秒数）例: "2.5秒"
+  motionType?: string;        // 動きの種類 例: "歩行", "振り返り", "静止"
+  cameraMovement?: string;    // カメラの動き 例: "パン", "ズームイン", "固定"
+  transition?: string;        // トランジション 例: "カット", "フェード", "ディゾルブ"
+  videoPrompt?: string;       // 動画生成用プロンプト
+  motionIntensity?: string;   // 動きの強度 例: "弱", "中", "強"
+  startFrame?: string;        // 開始フレームの状態
+  endFrame?: string;          // 終了フレームの状態
 }
 
 export const DEFAULT_CUTS: CutItem[] = [

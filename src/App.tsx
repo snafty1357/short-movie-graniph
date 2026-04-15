@@ -12,7 +12,7 @@ const ShortVideoModal = lazy(() => import('./components/ShortVideoModal'));
 const StoryPdfUploader = lazy(() => import('./components/StoryPdfUploader'));
 const StoryboardWorkflowModal = lazy(() => import('./components/StoryboardWorkflowModal'));
 
-import { User, Users, Sun, Moon, UserCircle, RotateCcw, RefreshCw, Pencil, ChevronDown, Sparkles, Image as ImageIcon, Loader2, Upload, Play, BookOpen, History, Save, Trash2, FolderOpen, Maximize2, X, Plus, Search, Download, Camera, Aperture, Focus } from 'lucide-react';
+import { User, Users, Sun, Moon, UserCircle, RotateCcw, RefreshCw, Pencil, ChevronDown, Sparkles, Image as ImageIcon, Loader2, Upload, Play, BookOpen, History, Save, Trash2, FolderOpen, Maximize2, X, Plus, Search, Download, Camera, Aperture, Focus, Film } from 'lucide-react';
 import { generatePose, fileToDataUrl } from './services/falService';
 import { generateFixedElements, generateCutComposition, compositionRowToCutItem, DEFAULT_FIXED_META_PROMPT, DEFAULT_REGULATION, DEFAULT_META_PROMPT, type AiModelType } from './services/storyPdfService';
 import { getEnabledAiModels, getSelectedModelId, setSelectedModelId, getProviderFromModelId, type AiModelVersion } from './services/aiModelConfig';
@@ -195,6 +195,9 @@ const App: React.FC = () => {
   // カット構成ステート（PDFアップロード前は空）
   const [cuts, setCuts] = useState<CutItem[]>([]);
 
+  // 構成表モード（画像用 / 動画用）
+  const [compositionMode, setCompositionMode] = useState<'image' | 'video'>('image');
+
   // --- カット編集ロジック ---
   const [editingCutId, setEditingCutId] = useState<number | null>(null);
   const [stillImageStyle, setStillImageStyle] = useState('masterpiece, 8k resolution, highly detailed, photorealistic, cinematic lighting');
@@ -325,7 +328,7 @@ const App: React.FC = () => {
 
 
 
-  const updateCutField = (id: number, field: 'title' | 'prompt' | 'camera' | 'semanticPrompt' | 'expression' | 'gaze' | 'pose' | 'walkingStyle' | 'walkPosition' | 'moveDistance' | 'action' | 'background' | 'productEmphasis', value: string) => {
+  const updateCutField = (id: number, field: 'title' | 'prompt' | 'camera' | 'semanticPrompt' | 'expression' | 'gaze' | 'pose' | 'walkingStyle' | 'walkPosition' | 'moveDistance' | 'action' | 'background' | 'productEmphasis' | 'duration' | 'motionType' | 'cameraMovement' | 'transition' | 'videoPrompt' | 'motionIntensity' | 'startFrame' | 'endFrame', value: string) => {
     setCuts(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c));
   };
 
@@ -2575,6 +2578,31 @@ JSON配列形式で出力してください。`
                 <div className="flex items-center gap-3">
                   <div className="w-1 h-5 rounded-full bg-gradient-to-b from-cyan-400 to-purple-500"></div>
                   <h2 className="text-[#333333] dark:text-gray-200 font-semibold text-sm">構成表設定（{enabledCuts.length}カット）</h2>
+                  {/* 画像/動画 切り替えタブ */}
+                  <div className="flex rounded-lg border border-[#E0E0E0] dark:border-white/10 overflow-hidden ml-2">
+                    <button
+                      onClick={() => setCompositionMode('image')}
+                      className={`flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold transition-all ${
+                        compositionMode === 'image'
+                          ? 'bg-cyan-500 text-white'
+                          : 'bg-white dark:bg-white/5 text-[#78909C] hover:text-[#333] dark:hover:text-white hover:bg-gray-50 dark:hover:bg-white/10'
+                      }`}
+                    >
+                      <ImageIcon size={11} />
+                      画像用
+                    </button>
+                    <button
+                      onClick={() => setCompositionMode('video')}
+                      className={`flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold transition-all ${
+                        compositionMode === 'video'
+                          ? 'bg-purple-500 text-white'
+                          : 'bg-white dark:bg-white/5 text-[#78909C] hover:text-[#333] dark:hover:text-white hover:bg-gray-50 dark:hover:bg-white/10'
+                      }`}
+                    >
+                      <Film size={11} />
+                      動画用
+                    </button>
+                  </div>
                 </div>
 
                 {/* Toolbar on the Right */}
@@ -2892,102 +2920,186 @@ JSON配列形式で出力してください。`
                           />
                         </div>
 
-                        {/* 詳細フィールド */}
-                        <div className="mt-3 p-3 bg-gray-50/50 dark:bg-white/[0.02] rounded-lg border border-[#E0E0E0] dark:border-white/5">
-                          <label className="text-[9px] text-[#78909C] dark:text-gray-500 uppercase tracking-wider mb-2 block">詳細設定</label>
-                          <div className="grid grid-cols-2 gap-2">
-                            <div>
-                              <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">表情</label>
-                              <input
-                                type="text"
-                                value={cut.expression || ''}
-                                onChange={(e) => updateCutField(cut.id, 'expression', e.target.value)}
-                                placeholder="笑顔、真剣、驚き..."
-                                className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">視線</label>
-                              <input
-                                type="text"
-                                value={cut.gaze || ''}
-                                onChange={(e) => updateCutField(cut.id, 'gaze', e.target.value)}
-                                placeholder="カメラ目線、前方..."
-                                className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">ポーズ</label>
-                              <input
-                                type="text"
-                                value={cut.pose || ''}
-                                onChange={(e) => updateCutField(cut.id, 'pose', e.target.value)}
-                                placeholder="立ち姿、座る..."
-                                className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">歩き方</label>
-                              <input
-                                type="text"
-                                value={cut.walkingStyle || ''}
-                                onChange={(e) => updateCutField(cut.id, 'walkingStyle', e.target.value)}
-                                placeholder="ゆっくり、自信ある歩行..."
-                                className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">画面位置</label>
-                              <input
-                                type="text"
-                                value={cut.walkPosition || ''}
-                                onChange={(e) => updateCutField(cut.id, 'walkPosition', e.target.value)}
-                                placeholder="中央、左寄り..."
-                                className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">移動距離</label>
-                              <input
-                                type="text"
-                                value={cut.moveDistance || ''}
-                                onChange={(e) => updateCutField(cut.id, 'moveDistance', e.target.value)}
-                                placeholder="短距離、中距離..."
-                                className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
-                              />
-                            </div>
-                            <div className="col-span-2">
-                              <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">アクション</label>
-                              <input
-                                type="text"
-                                value={cut.action || ''}
-                                onChange={(e) => updateCutField(cut.id, 'action', e.target.value)}
-                                placeholder="歩いている、振り返る..."
-                                className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">背景</label>
-                              <input
-                                type="text"
-                                value={cut.background || ''}
-                                onChange={(e) => updateCutField(cut.id, 'background', e.target.value)}
-                                placeholder="街並み、室内..."
-                                className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">プロダクト強調</label>
-                              <input
-                                type="text"
-                                value={cut.productEmphasis || ''}
-                                onChange={(e) => updateCutField(cut.id, 'productEmphasis', e.target.value)}
-                                placeholder="袖、ロゴ..."
-                                className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
-                              />
+                        {/* 詳細フィールド - 画像用 */}
+                        {compositionMode === 'image' && (
+                          <div className="mt-3 p-3 bg-cyan-50/50 dark:bg-cyan-500/[0.02] rounded-lg border border-cyan-200 dark:border-cyan-500/10">
+                            <label className="text-[9px] text-cyan-600 dark:text-cyan-400 uppercase tracking-wider mb-2 block font-bold">📷 画像生成用設定</label>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">表情</label>
+                                <input
+                                  type="text"
+                                  value={cut.expression || ''}
+                                  onChange={(e) => updateCutField(cut.id, 'expression', e.target.value)}
+                                  placeholder="笑顔、真剣、驚き..."
+                                  className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">視線</label>
+                                <input
+                                  type="text"
+                                  value={cut.gaze || ''}
+                                  onChange={(e) => updateCutField(cut.id, 'gaze', e.target.value)}
+                                  placeholder="カメラ目線、前方..."
+                                  className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">ポーズ</label>
+                                <input
+                                  type="text"
+                                  value={cut.pose || ''}
+                                  onChange={(e) => updateCutField(cut.id, 'pose', e.target.value)}
+                                  placeholder="立ち姿、座る..."
+                                  className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">背景</label>
+                                <input
+                                  type="text"
+                                  value={cut.background || ''}
+                                  onChange={(e) => updateCutField(cut.id, 'background', e.target.value)}
+                                  placeholder="街並み、室内..."
+                                  className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50"
+                                />
+                              </div>
+                              <div className="col-span-2">
+                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">プロダクト強調</label>
+                                <input
+                                  type="text"
+                                  value={cut.productEmphasis || ''}
+                                  onChange={(e) => updateCutField(cut.id, 'productEmphasis', e.target.value)}
+                                  placeholder="袖、ロゴ、素材感..."
+                                  className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50"
+                                />
+                              </div>
                             </div>
                           </div>
-                        </div>
+                        )}
+
+                        {/* 詳細フィールド - 動画用 */}
+                        {compositionMode === 'video' && (
+                          <div className="mt-3 p-3 bg-purple-50/50 dark:bg-purple-500/[0.02] rounded-lg border border-purple-200 dark:border-purple-500/10">
+                            <label className="text-[9px] text-purple-600 dark:text-purple-400 uppercase tracking-wider mb-2 block font-bold">🎬 動画生成用設定</label>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">尺（秒数）</label>
+                                <div className="flex gap-1">
+                                  {['2秒', '3秒', '5秒'].map(d => (
+                                    <button
+                                      key={d}
+                                      onClick={() => updateCutField(cut.id, 'duration', d)}
+                                      className={`flex-1 px-1.5 py-1 rounded text-[9px] font-bold border transition-all ${
+                                        cut.duration === d
+                                          ? 'bg-purple-500 text-white border-purple-600'
+                                          : 'bg-white dark:bg-white/5 border-[#E0E0E0] dark:border-white/10 text-[#78909C] hover:text-[#333] dark:hover:text-white'
+                                      }`}
+                                    >
+                                      {d}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                              <div>
+                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">動きの強度</label>
+                                <div className="flex gap-1">
+                                  {['弱', '中', '強'].map(m => (
+                                    <button
+                                      key={m}
+                                      onClick={() => updateCutField(cut.id, 'motionIntensity', m)}
+                                      className={`flex-1 px-1.5 py-1 rounded text-[9px] font-bold border transition-all ${
+                                        cut.motionIntensity === m
+                                          ? 'bg-purple-500 text-white border-purple-600'
+                                          : 'bg-white dark:bg-white/5 border-[#E0E0E0] dark:border-white/10 text-[#78909C] hover:text-[#333] dark:hover:text-white'
+                                      }`}
+                                    >
+                                      {m}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                              <div>
+                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">動きの種類</label>
+                                <input
+                                  type="text"
+                                  value={cut.motionType || ''}
+                                  onChange={(e) => updateCutField(cut.id, 'motionType', e.target.value)}
+                                  placeholder="歩行、振り返り、静止..."
+                                  className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">カメラの動き</label>
+                                <input
+                                  type="text"
+                                  value={cut.cameraMovement || ''}
+                                  onChange={(e) => updateCutField(cut.id, 'cameraMovement', e.target.value)}
+                                  placeholder="パン、ズームイン、固定..."
+                                  className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">開始フレーム</label>
+                                <input
+                                  type="text"
+                                  value={cut.startFrame || ''}
+                                  onChange={(e) => updateCutField(cut.id, 'startFrame', e.target.value)}
+                                  placeholder="立っている、画面外から..."
+                                  className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">終了フレーム</label>
+                                <input
+                                  type="text"
+                                  value={cut.endFrame || ''}
+                                  onChange={(e) => updateCutField(cut.id, 'endFrame', e.target.value)}
+                                  placeholder="歩き去る、静止..."
+                                  className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">トランジション</label>
+                                <div className="flex gap-1">
+                                  {['カット', 'フェード', 'ディゾルブ'].map(t => (
+                                    <button
+                                      key={t}
+                                      onClick={() => updateCutField(cut.id, 'transition', t)}
+                                      className={`flex-1 px-1 py-1 rounded text-[8px] font-bold border transition-all ${
+                                        cut.transition === t
+                                          ? 'bg-purple-500 text-white border-purple-600'
+                                          : 'bg-white dark:bg-white/5 border-[#E0E0E0] dark:border-white/10 text-[#78909C] hover:text-[#333] dark:hover:text-white'
+                                      }`}
+                                    >
+                                      {t}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                              <div>
+                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">画面位置</label>
+                                <input
+                                  type="text"
+                                  value={cut.walkPosition || ''}
+                                  onChange={(e) => updateCutField(cut.id, 'walkPosition', e.target.value)}
+                                  placeholder="中央、左→右..."
+                                  className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
+                                />
+                              </div>
+                              <div className="col-span-2">
+                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">動画プロンプト</label>
+                                <textarea
+                                  value={cut.videoPrompt || ''}
+                                  onChange={(e) => updateCutField(cut.id, 'videoPrompt', e.target.value)}
+                                  placeholder="動画生成用の詳細な動き指示..."
+                                  className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1.5 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50 resize-y min-h-[40px]"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
 
                         <div>
                           <div className="flex items-center justify-between mb-1.5 mt-3">
