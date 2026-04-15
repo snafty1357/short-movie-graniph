@@ -90,7 +90,7 @@ const ShortVideoModal: React.FC<ShortVideoModalProps> = ({
   const playIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Kling video generation settings
-  const [klingModel, setKlingModel] = useState<KlingModel>('v2-master');
+  const [klingModel, setKlingModel] = useState<KlingModel>('v2.6-pro');
   const [klingDuration, setKlingDuration] = useState<KlingDuration>('5');
   const [klingAspectRatio, setKlingAspectRatio] = useState<KlingAspectRatio>('9:16');
   const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
@@ -509,6 +509,7 @@ const ShortVideoModal: React.FC<ShortVideoModalProps> = ({
                       <option value="v1-pro">V1 Pro</option>
                       <option value="v2-master">V2 Master</option>
                       <option value="v2.1-pro">V2.1 Pro</option>
+                      <option value="v2.6-pro">V2.6 Pro</option>
                     </select>
                   </div>
 
