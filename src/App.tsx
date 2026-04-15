@@ -1185,6 +1185,116 @@ JSON配列形式で出力してください。`
     return subCharDetails.filter(d => d.value.trim()).map(d => `${d.label}: ${d.value}`).join(', ');
   };
 
+  // プロンプト生成中フラグ
+  const [isGeneratingMainPrompt, setIsGeneratingMainPrompt] = useState(false);
+  const [isGeneratingIpPrompt, setIsGeneratingIpPrompt] = useState(false);
+
+  // メインキャラクターのプロンプト生成
+  const generateMainCharPrompt = async () => {
+    setIsGeneratingMainPrompt(true);
+    try {
+      const details = mainCharDetails.filter(d => d.value.trim()).map(d => `${d.label}: ${d.value}`);
+      const instructions = mainCustomInstructions.filter(i => i.active).map(i => i.label);
+      const photoLocks = MAIN_PHOTO_LOCK_PRESETS.filter(p => activeMainPhotoLocks.has(p.id)).map(p => p.label);
+
+      const inputContext = [
+        details.length > 0 ? `詳細設定: ${details.join(', ')}` : '',
+        instructions.length > 0 ? `カスタム指示: ${instructions.join(', ')}` : '',
+        photoLocks.length > 0 ? `写真固定: ${photoLocks.join(', ')}` : '',
+      ].filter(Boolean).join('\n');
+
+      if (!inputContext) {
+        alert('詳細設定やカスタム指示を入力してください');
+        setIsGeneratingMainPrompt(false);
+        return;
+      }
+
+      const response = await fetch('/api/claude', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 500,
+          messages: [{
+            role: 'user',
+            content: `以下のキャラクター設定から、画像生成AI用の英語プロンプトを生成してください。
+ファッションモデルの撮影を想定し、服装、表情、ポーズ、雰囲気などを含めてください。
+
+${inputContext}
+
+出力形式: 英語プロンプトのみ（説明不要）
+例: elegant woman with gentle smile, wearing casual white t-shirt and denim jeans, natural makeup, confident pose, soft lighting`
+          }]
+        })
+      });
+
+      const data = await response.json();
+      const generatedPrompt = data.content?.[0]?.text || data.content || '';
+      if (generatedPrompt) {
+        setMainCharPrompt(generatedPrompt.trim());
+      }
+    } catch (error) {
+      console.error('Prompt generation error:', error);
+      alert('プロンプト生成に失敗しました');
+    } finally {
+      setIsGeneratingMainPrompt(false);
+    }
+  };
+
+  // IPキャラクターのプロンプト生成
+  const generateIpCharPrompt = async () => {
+    setIsGeneratingIpPrompt(true);
+    try {
+      const details = subCharDetails.filter(d => d.value.trim()).map(d => `${d.label}: ${d.value}`);
+      const presets = SUB_CHAR_PRESETS.filter(p => activeSubTags.has(p.id)).map(p => p.label);
+      const instructions = subCustomInstructions.filter(i => i.active).map(i => i.label);
+      const photoLocks = IP_PHOTO_LOCK_PRESETS.filter(p => activeIpPhotoLocks.has(p.id)).map(p => p.label);
+
+      const inputContext = [
+        presets.length > 0 ? `プリセット: ${presets.join(', ')}` : '',
+        details.length > 0 ? `詳細設定: ${details.join(', ')}` : '',
+        instructions.length > 0 ? `カスタム指示: ${instructions.join(', ')}` : '',
+        photoLocks.length > 0 ? `写真固定: ${photoLocks.join(', ')}` : '',
+      ].filter(Boolean).join('\n');
+
+      if (!inputContext) {
+        alert('プリセットや詳細設定を選択/入力してください');
+        setIsGeneratingIpPrompt(false);
+        return;
+      }
+
+      const response = await fetch('/api/claude', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 500,
+          messages: [{
+            role: 'user',
+            content: `以下のIPキャラクター（サブキャラクター）設定から、画像生成AI用の英語プロンプトを生成してください。
+メインキャラクターと共演する小さなキャラクターを想定しています。
+
+${inputContext}
+
+出力形式: 英語プロンプトのみ（説明不要）
+例: tiny cute mascot character, approximately 20cm tall, expressionless face, can interact with physical objects, invisible to main character`
+          }]
+        })
+      });
+
+      const data = await response.json();
+      const generatedPrompt = data.content?.[0]?.text || data.content || '';
+      if (generatedPrompt) {
+        setCustomSubPrompt(generatedPrompt.trim());
+      }
+    } catch (error) {
+      console.error('IP Prompt generation error:', error);
+      alert('プロンプト生成に失敗しました');
+    } finally {
+      setIsGeneratingIpPrompt(false);
+    }
+  };
+
   // 履歴機能
   const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
   const [projectHistory, setProjectHistory] = useState<ProjectHistoryEntry[]>([]);
@@ -1900,7 +2010,30 @@ JSON配列形式で出力してください。`
                               </div>
                             </div>
                             <div>
-                              <label className="text-[10px] font-bold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">感情・基本挙動プロンプト</label>
+                              <div className="flex items-center justify-between mb-1.5">
+                                <label className="text-[10px] font-bold text-[#78909C] dark:text-gray-400 uppercase tracking-wider">感情・基本挙動プロンプト</label>
+                                <button
+                                  onClick={generateMainCharPrompt}
+                                  disabled={isGeneratingMainPrompt}
+                                  className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-bold transition-all ${
+                                    isGeneratingMainPrompt
+                                      ? 'bg-cyan-200 dark:bg-cyan-500/20 text-cyan-600 cursor-wait'
+                                      : 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/20'
+                                  }`}
+                                >
+                                  {isGeneratingMainPrompt ? (
+                                    <>
+                                      <Loader2 size={10} className="animate-spin" />
+                                      生成中...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Sparkles size={10} />
+                                      プロンプト生成
+                                    </>
+                                  )}
+                                </button>
+                              </div>
                               <textarea
                                 value={mainCharPrompt}
                                 onChange={(e) => setMainCharPrompt(e.target.value)}
@@ -2126,13 +2259,36 @@ JSON配列形式で出力してください。`
                                   </div>
                                 )}
                               </div>
-                              <input
-                                type="text"
-                                value={customSubPrompt}
-                                onChange={(e) => setCustomSubPrompt(e.target.value)}
-                                placeholder="追加の指示を入力..."
-                                className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg px-2.5 py-1.5 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50 placeholder:text-gray-400 dark:placeholder:text-gray-600"
-                              />
+                              <div className="flex items-center gap-2 mt-2">
+                                <input
+                                  type="text"
+                                  value={customSubPrompt}
+                                  onChange={(e) => setCustomSubPrompt(e.target.value)}
+                                  placeholder="追加の指示を入力..."
+                                  className="flex-1 bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg px-2.5 py-1.5 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50 placeholder:text-gray-400 dark:placeholder:text-gray-600"
+                                />
+                                <button
+                                  onClick={generateIpCharPrompt}
+                                  disabled={isGeneratingIpPrompt}
+                                  className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-[9px] font-bold transition-all shrink-0 ${
+                                    isGeneratingIpPrompt
+                                      ? 'bg-purple-200 dark:bg-purple-500/20 text-purple-600 cursor-wait'
+                                      : 'bg-purple-500/10 text-purple-600 dark:text-purple-400 hover:bg-purple-500/20'
+                                  }`}
+                                >
+                                  {isGeneratingIpPrompt ? (
+                                    <>
+                                      <Loader2 size={10} className="animate-spin" />
+                                      生成中
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Sparkles size={10} />
+                                      プロンプト生成
+                                    </>
+                                  )}
+                                </button>
+                              </div>
                             </div>
                           </div>
                         </div>
