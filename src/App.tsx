@@ -241,7 +241,7 @@ const App: React.FC = () => {
     };
     checkApi('openai', 'gpt-4o-mini');
     checkApi('gemini', 'gemini-2.0-flash');
-    checkApi('claude', 'claude-3-5-haiku-20241022');
+    checkApi('claude', 'claude-3-haiku-20240307');
   }, []);
 
   useEffect(() => {
