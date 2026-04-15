@@ -37,6 +37,26 @@ const App: React.FC = () => {
   const [customSubPrompt, setCustomSubPrompt] = useState('');
   const [mainCharPrompt, setMainCharPrompt] = useState('');
 
+  // 写真固定プリセット（メインモデル用）
+  const MAIN_PHOTO_LOCK_PRESETS = [
+    { id: 'face_lock', label: '顔を固定', prompt: 'exact same face as reference image, identical facial features, same face shape, same eyes, same nose, same lips, preserve facial identity completely' },
+    { id: 'outfit_lock', label: '服装を固定', prompt: 'exact same clothing as reference image, identical outfit, same fabric texture, same color, same style, preserve clothing details completely' },
+    { id: 'hair_lock', label: '髪型を固定', prompt: 'exact same hairstyle as reference image, identical hair color, same hair length, same hair texture, preserve hair style completely' },
+    { id: 'pose_lock', label: 'ポーズを固定', prompt: 'similar pose as reference image, maintain body positioning, preserve posture' },
+    { id: 'all_lock', label: '全て固定', prompt: 'exact same appearance as reference image, identical face, same clothing, same hairstyle, preserve all visual details from the original photo' },
+  ] as const;
+
+  // 写真固定プリセット（IP/サブキャラ用）
+  const IP_PHOTO_LOCK_PRESETS = [
+    { id: 'ip_face_lock', label: '顔を固定', prompt: 'exact same face as IP reference, identical facial features, preserve IP character face completely' },
+    { id: 'ip_outfit_lock', label: '服装を固定', prompt: 'exact same clothing as IP reference, identical outfit style, preserve IP character clothing' },
+    { id: 'ip_style_lock', label: 'スタイルを固定', prompt: 'exact same visual style as IP reference, identical art style, same color palette' },
+    { id: 'ip_all_lock', label: '全て固定', prompt: 'exact same appearance as IP reference image, preserve all IP character visual details completely' },
+  ] as const;
+
+  const [activeMainPhotoLocks, setActiveMainPhotoLocks] = useState<Set<string>>(new Set());
+  const [activeIpPhotoLocks, setActiveIpPhotoLocks] = useState<Set<string>>(new Set());
+
   // カスタム指示ブロック（CustomInstructionBlockはhooksからインポート）
   const [mainCustomInstructions, setMainCustomInstructions] = useState<CustomInstructionBlock[]>([]);
   const [subCustomInstructions, setSubCustomInstructions] = useState<CustomInstructionBlock[]>([]);
@@ -132,15 +152,31 @@ const App: React.FC = () => {
     localStorage.setItem('snafty_instruction_presets', JSON.stringify(updated));
   };
 
-  // サブキャラ用プロンプト生成（カスタム指示を含む）
+  // メインキャラ写真固定プロンプト生成
+  const mainPhotoLockPrompt = MAIN_PHOTO_LOCK_PRESETS
+    .filter(p => activeMainPhotoLocks.has(p.id))
+    .map(p => p.prompt)
+    .join(', ');
+
+  // IP写真固定プロンプト生成
+  const ipPhotoLockPrompt = IP_PHOTO_LOCK_PRESETS
+    .filter(p => activeIpPhotoLocks.has(p.id))
+    .map(p => p.prompt)
+    .join(', ');
+
+  // サブキャラ用プロンプト生成（カスタム指示 + 写真固定を含む）
   const subCharPrompt = [
     ...SUB_CHAR_PRESETS.filter(p => activeSubTags.has(p.id)).map(p => p.prompt),
     ...subCustomInstructions.filter(i => i.active).map(i => i.prompt),
+    ...(ipPhotoLockPrompt ? [ipPhotoLockPrompt] : []),
     ...(customSubPrompt.trim() ? [customSubPrompt.trim()] : []),
   ].join(', ');
 
-  // メインキャラ用カスタム指示プロンプト
-  const mainCustomPrompt = mainCustomInstructions.filter(i => i.active).map(i => i.prompt).join(', ');
+  // メインキャラ用カスタム指示プロンプト（写真固定を含む）
+  const mainCustomPrompt = [
+    ...mainCustomInstructions.filter(i => i.active).map(i => i.prompt),
+    ...(mainPhotoLockPrompt ? [mainPhotoLockPrompt] : []),
+  ].join(', ');
 
   // UI状態
   const [isGenerating, setIsGenerating] = useState(false);
@@ -1496,6 +1532,50 @@ JSON配列形式で出力してください。`
                                   ))}
                                 </div>
                               )}
+                              {/* 写真固定オプション（メインモデル） */}
+                              <div className="mb-3">
+                                <label className="text-[9px] font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wider mb-1.5 block flex items-center gap-1">
+                                  🔒 写真の特徴を固定
+                                </label>
+                                <div className="flex flex-wrap gap-1">
+                                  {MAIN_PHOTO_LOCK_PRESETS.map((preset) => (
+                                    <button
+                                      key={preset.id}
+                                      onClick={() => {
+                                        setActiveMainPhotoLocks(prev => {
+                                          const next = new Set(prev);
+                                          if (next.has(preset.id)) {
+                                            next.delete(preset.id);
+                                          } else {
+                                            // 「全て固定」選択時は他を解除、他選択時は「全て固定」を解除
+                                            if (preset.id === 'all_lock') {
+                                              next.clear();
+                                              next.add('all_lock');
+                                            } else {
+                                              next.delete('all_lock');
+                                              next.add(preset.id);
+                                            }
+                                          }
+                                          return next;
+                                        });
+                                      }}
+                                      className={`px-2 py-1 rounded-lg text-[9px] font-bold border transition-all ${
+                                        activeMainPhotoLocks.has(preset.id)
+                                          ? 'bg-amber-500/20 border-amber-500/50 text-amber-600 dark:text-amber-400'
+                                          : 'bg-transparent border-gray-200 dark:border-white/10 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
+                                      }`}
+                                    >
+                                      {preset.label}
+                                    </button>
+                                  ))}
+                                </div>
+                                {activeMainPhotoLocks.size > 0 && (
+                                  <p className="text-[8px] text-amber-500/70 mt-1">
+                                    ✓ 選択した特徴は生成時に元画像から維持されます
+                                  </p>
+                                )}
+                              </div>
+
                               {/* カスタム指示ブロック */}
                               <div className="flex flex-wrap gap-1.5 mb-2">
                                 {mainCustomInstructions.map((instruction) => (
@@ -1687,6 +1767,44 @@ JSON配列形式で出力してください。`
                                     {tag.label}
                                   </button>
                                 ))}
+                                {/* 写真固定オプション（IP/サブキャラ） */}
+                                <div className="w-full mb-2 pt-2 border-t border-gray-200 dark:border-white/10">
+                                  <label className="text-[9px] font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wider mb-1.5 block flex items-center gap-1">
+                                    🔒 IP写真の特徴を固定
+                                  </label>
+                                  <div className="flex flex-wrap gap-1">
+                                    {IP_PHOTO_LOCK_PRESETS.map((preset) => (
+                                      <button
+                                        key={preset.id}
+                                        onClick={() => {
+                                          setActiveIpPhotoLocks(prev => {
+                                            const next = new Set(prev);
+                                            if (next.has(preset.id)) {
+                                              next.delete(preset.id);
+                                            } else {
+                                              if (preset.id === 'ip_all_lock') {
+                                                next.clear();
+                                                next.add('ip_all_lock');
+                                              } else {
+                                                next.delete('ip_all_lock');
+                                                next.add(preset.id);
+                                              }
+                                            }
+                                            return next;
+                                          });
+                                        }}
+                                        className={`px-2 py-1 rounded-lg text-[9px] font-bold border transition-all ${
+                                          activeIpPhotoLocks.has(preset.id)
+                                            ? 'bg-amber-500/20 border-amber-500/50 text-amber-600 dark:text-amber-400'
+                                            : 'bg-transparent border-gray-200 dark:border-white/10 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
+                                        }`}
+                                      >
+                                        {preset.label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+
                                 {/* カスタム指示ブロック（サブキャラ） */}
                                 {subCustomInstructions.map((instruction) => (
                                   <div
