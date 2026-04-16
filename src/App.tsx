@@ -254,10 +254,12 @@ const App: React.FC = () => {
     lastGeneratedAt: Date | null;
     generationTimeMs: number | null;
     cutCount: number;
+    usedModel: string | null;
   }>({
     lastGeneratedAt: null,
     generationTimeMs: null,
     cutCount: 0,
+    usedModel: null,
   });
 
   // ─── API稼働状況チェック ───
@@ -727,6 +729,7 @@ Output ONLY the formatted prompt, no explanations.`
         lastGeneratedAt: new Date(),
         generationTimeMs: cutCompositionTime,
         cutCount: newCuts.length,
+        usedModel: selectedModelId || aiModel,
       });
 
       // スタイルプロンプトも設定（要素固定プロンプトをベースに）
@@ -2994,15 +2997,30 @@ ${inputContext}
                 {cutGenerationStats.lastGeneratedAt && (
                   <div className="flex items-center gap-3 text-[10px] text-gray-500 dark:text-gray-400 border-l border-violet-200 dark:border-violet-500/20 pl-3">
                     <div className="flex items-center gap-1">
+                      <span className="text-violet-500">🤖</span>
+                      <span className={`font-bold px-1.5 py-0.5 rounded text-[9px] ${
+                        cutGenerationStats.usedModel?.includes('claude') || cutGenerationStats.usedModel?.includes('Claude')
+                          ? 'bg-orange-100 dark:bg-orange-500/20 text-orange-600 dark:text-orange-400'
+                          : cutGenerationStats.usedModel?.includes('gpt') || cutGenerationStats.usedModel?.includes('openai')
+                          ? 'bg-green-100 dark:bg-green-500/20 text-green-600 dark:text-green-400'
+                          : 'bg-gray-100 dark:bg-gray-500/20 text-gray-600 dark:text-gray-400'
+                      }`}>
+                        {cutGenerationStats.usedModel === 'gpt-4o' ? 'GPT-4o' :
+                         cutGenerationStats.usedModel === 'gpt-4o-mini' ? 'GPT-4o mini' :
+                         cutGenerationStats.usedModel === 'claude-3-5-sonnet' ? 'Claude 3.5 Sonnet' :
+                         cutGenerationStats.usedModel === 'claude-3-7-sonnet' ? 'Claude 3.7 Sonnet' :
+                         cutGenerationStats.usedModel === 'claude-sonnet-4' ? 'Claude Sonnet 4' :
+                         cutGenerationStats.usedModel || 'Unknown'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1">
                       <span className="text-violet-500">⏱</span>
-                      <span>生成時間:</span>
                       <span className="font-bold text-gray-700 dark:text-gray-300">
                         {cutGenerationStats.generationTimeMs ? `${(cutGenerationStats.generationTimeMs / 1000).toFixed(1)}秒` : '-'}
                       </span>
                     </div>
                     <div className="flex items-center gap-1">
                       <span className="text-violet-500">📊</span>
-                      <span>平均:</span>
                       <span className="font-bold text-gray-700 dark:text-gray-300">
                         {cutGenerationStats.generationTimeMs && cutGenerationStats.cutCount > 0
                           ? `${(cutGenerationStats.generationTimeMs / cutGenerationStats.cutCount / 1000).toFixed(2)}秒/カット`
@@ -3011,7 +3029,6 @@ ${inputContext}
                     </div>
                     <div className="flex items-center gap-1">
                       <span className="text-violet-500">🕐</span>
-                      <span>生成:</span>
                       <span className="font-bold text-gray-700 dark:text-gray-300">
                         {cutGenerationStats.lastGeneratedAt.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
                       </span>
