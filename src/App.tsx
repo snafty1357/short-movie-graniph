@@ -920,6 +920,11 @@ JSON配列形式で出力してください。`
   const generateVideoPromptFromSettings = (cut: CutItem): string => {
     const parts: string[] = [];
 
+    // メタプロンプト（動画設定で設定したルール）を最初に追加
+    if (videoMetaPrompt && videoMetaPrompt.trim()) {
+      parts.push(videoMetaPrompt.trim());
+    }
+
     // 動きの種類
     if (cut.motionType) {
       parts.push(`Motion: ${cut.motionType}`);
@@ -964,8 +969,13 @@ JSON配列形式で出力してください。`
       parts.push(cut.videoPrompt);
     }
 
-    // スタイル
-    parts.push('Cinematic fashion video, smooth motion, professional lighting');
+    // 生成プロンプトスタイル（動画設定で手動編集したもの）
+    if (videoPromptStyle && videoPromptStyle.trim()) {
+      parts.push(videoPromptStyle.trim());
+    } else {
+      // デフォルトスタイル
+      parts.push('Cinematic fashion video, smooth motion, professional lighting');
+    }
 
     return parts.join('. ');
   };
@@ -1017,6 +1027,74 @@ JSON配列形式で出力してください。`
       console.error(`Cut ${cutId} video generation error:`, err);
       setCuts(prev => prev.map(c => c.id === cutId ? { ...c, isGeneratingVideo: false, errorMessage: err instanceof Error ? err.message : '動画生成失敗' } : c));
     }
+  };
+
+  // 全カットの動画を一括生成
+  const [isGeneratingVideos, setIsGeneratingVideos] = useState(false);
+
+  const generateAllCutVideos = async () => {
+    // 画像が生成されている有効なカットのみ対象
+    const cutsWithImages = cuts.filter(c => c.enabled && c.generatedImageUrl && !c.generatedVideoUrl);
+
+    if (cutsWithImages.length === 0) {
+      // すべてのカットに動画がある場合
+      const allHaveVideos = cuts.filter(c => c.enabled && c.generatedVideoUrl).length === enabledCuts.length;
+      if (allHaveVideos && enabledCuts.length > 0) {
+        alert('すべてのカットの動画は既に生成済みです。');
+      } else {
+        alert('動画を生成するには、先に画像を生成してください。');
+      }
+      return;
+    }
+
+    setIsGeneratingVideos(true);
+
+    // 対象カットを生成中状態にマーク
+    setCuts(prev => prev.map(c =>
+      cutsWithImages.find(cut => cut.id === c.id)
+        ? { ...c, isGeneratingVideo: true, errorMessage: undefined }
+        : c
+    ));
+
+    // 各カットの動画を順次生成（並列だとAPI制限に引っかかる可能性があるため）
+    for (const cut of cutsWithImages) {
+      try {
+        const videoPrompt = generateVideoPromptFromSettings(cut);
+
+        // 尺を取得（デフォルト5秒）
+        const durationMap: Record<string, '5' | '10'> = {
+          '2秒': '5',
+          '3秒': '5',
+          '5秒': '5',
+        };
+        const duration = durationMap[cut.duration || '5秒'] || '5';
+
+        const result = await generateKlingVideo({
+          imageUrl: cut.generatedImageUrl!,
+          prompt: videoPrompt,
+          duration,
+          aspectRatio: '9:16',
+          model: 'v2.6-pro',
+        });
+
+        setCuts(prev => prev.map(c => c.id === cut.id ? {
+          ...c,
+          isGeneratingVideo: false,
+          generatedVideoUrl: result.videoUrl,
+          videoPrompt,
+        } : c));
+
+      } catch (err) {
+        console.error(`Cut ${cut.id} video generation error:`, err);
+        setCuts(prev => prev.map(c => c.id === cut.id ? {
+          ...c,
+          isGeneratingVideo: false,
+          errorMessage: err instanceof Error ? err.message : '動画生成失敗'
+        } : c));
+      }
+    }
+
+    setIsGeneratingVideos(false);
   };
 
   // 全カットの画像を同時生成
@@ -2935,16 +3013,16 @@ ${inputContext}
                 {/* Toolbar on the Right */}
                 <div className="flex items-center gap-3">
                   <button
-                    onClick={() => setVideoModalOpen(true)}
-                    disabled={isGenerating || !humanFile}
+                    onClick={generateAllCutVideos}
+                    disabled={isGenerating || isGeneratingVideos || enabledCuts.filter(c => c.generatedImageUrl).length === 0}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all shadow-sm ${
-                      isGenerating || !humanFile
+                      isGenerating || isGeneratingVideos || enabledCuts.filter(c => c.generatedImageUrl).length === 0
                         ? 'bg-gray-100 dark:bg-white/5 text-[#9E9E9E] dark:text-gray-500 cursor-not-allowed border outline-none'
                         : 'bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-purple-500/20 hover:shadow-purple-500/40 hover:scale-105'
                     }`}
                   >
-                    <Play size={10} />
-                    一括動画生成
+                    {isGeneratingVideos ? <Loader2 size={10} className="animate-spin" /> : <Play size={10} />}
+                    {isGeneratingVideos ? `動画生成中... (${cuts.filter(c => c.isGeneratingVideo).length > 0 ? cuts.findIndex(c => c.isGeneratingVideo) + 1 : 0}/${enabledCuts.filter(c => c.generatedImageUrl && !c.generatedVideoUrl).length})` : '一括動画生成'}
                   </button>
 
                   <div className="relative" ref={semanticPanelRef}>
