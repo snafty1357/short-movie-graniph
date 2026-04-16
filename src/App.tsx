@@ -3100,6 +3100,34 @@ ${inputContext}
                 />
               </Suspense>
 
+            {/* 画像/動画 モード切り替え */}
+            <div className="flex items-center justify-center gap-2 mb-4">
+              <div className="flex rounded-xl border-2 border-[#E0E0E0] dark:border-white/10 overflow-hidden shadow-sm">
+                <button
+                  onClick={() => setCompositionMode('image')}
+                  className={`flex items-center gap-2 px-5 py-2.5 text-sm font-bold transition-all ${
+                    compositionMode === 'image'
+                      ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white shadow-inner'
+                      : 'bg-white dark:bg-white/5 text-[#78909C] hover:text-[#333] dark:hover:text-white hover:bg-gray-50 dark:hover:bg-white/10'
+                  }`}
+                >
+                  <ImageIcon size={16} />
+                  静止画モード
+                </button>
+                <button
+                  onClick={() => setCompositionMode('video')}
+                  className={`flex items-center gap-2 px-5 py-2.5 text-sm font-bold transition-all ${
+                    compositionMode === 'video'
+                      ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-inner'
+                      : 'bg-white dark:bg-white/5 text-[#78909C] hover:text-[#333] dark:hover:text-white hover:bg-gray-50 dark:hover:bg-white/10'
+                  }`}
+                >
+                  <Film size={16} />
+                  動画モード
+                </button>
+              </div>
+            </div>
+
             {/* Composition Plan Settings */}
             <div className="glass rounded-2xl p-4">
               <div className="flex items-center justify-between mb-4">
@@ -3107,31 +3135,6 @@ ${inputContext}
                 <div className="flex items-center gap-3">
                   <div className="w-1 h-5 rounded-full bg-gradient-to-b from-cyan-400 to-purple-500"></div>
                   <h2 className="text-[#333333] dark:text-gray-200 font-semibold text-sm">構成表設定（{enabledCuts.length}カット）</h2>
-                  {/* 画像/動画 切り替えタブ */}
-                  <div className="flex rounded-lg border border-[#E0E0E0] dark:border-white/10 overflow-hidden ml-2">
-                    <button
-                      onClick={() => setCompositionMode('image')}
-                      className={`flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold transition-all ${
-                        compositionMode === 'image'
-                          ? 'bg-cyan-500 text-white'
-                          : 'bg-white dark:bg-white/5 text-[#78909C] hover:text-[#333] dark:hover:text-white hover:bg-gray-50 dark:hover:bg-white/10'
-                      }`}
-                    >
-                      <ImageIcon size={11} />
-                      画像用
-                    </button>
-                    <button
-                      onClick={() => setCompositionMode('video')}
-                      className={`flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold transition-all ${
-                        compositionMode === 'video'
-                          ? 'bg-purple-500 text-white'
-                          : 'bg-white dark:bg-white/5 text-[#78909C] hover:text-[#333] dark:hover:text-white hover:bg-gray-50 dark:hover:bg-white/10'
-                      }`}
-                    >
-                      <Film size={11} />
-                      動画用
-                    </button>
-                  </div>
                 </div>
 
                 {/* Toolbar on the Right */}
