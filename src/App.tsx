@@ -1262,6 +1262,17 @@ JSON配列形式で出力してください。`
       const successCount = results.filter(r => r.success).length;
       console.log(`[ImageGeneration] Completed: ${successCount}/${enabledCutsToGenerate.length} images generated`);
 
+      // 画像生成完了後、動画プロンプトを各カットに自動設定
+      console.log('[ImageGeneration] Auto-generating video prompts for each cut...');
+      setCuts(prevCuts => prevCuts.map(cut => {
+        if (cut.enabled && cut.generatedImageUrl) {
+          const autoVideoPrompt = generateVideoPromptFromSettings(cut);
+          return { ...cut, videoPrompt: autoVideoPrompt };
+        }
+        return cut;
+      }));
+      console.log('[ImageGeneration] Video prompts auto-generated');
+
     } catch (err) {
       console.error('Batch generation error:', err);
       setError(err instanceof Error ? err.message : '画像生成中にエラーが発生しました');
