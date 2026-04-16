@@ -249,6 +249,18 @@ const App: React.FC = () => {
 
   const enabledCuts = cuts.filter(c => c.enabled);
 
+  // ─── カット割り生成統計 ───
+  const [cutGenerationStats, setCutGenerationStats] = useState<{
+    lastGeneratedAt: Date | null;
+    generationTimeMs: number | null;
+    cutCount: number;
+  }>({
+    lastGeneratedAt: null,
+    generationTimeMs: null,
+    cutCount: 0,
+  });
+  const [cutGenerationStartTime, setCutGenerationStartTime] = useState<number | null>(null);
+
   // ─── API稼働状況チェック ───
   type ApiStatus = 'checking' | 'ok' | 'error';
   const [apiStatuses, setApiStatuses] = useState<Record<string, ApiStatus>>({
@@ -709,6 +721,13 @@ Output ONLY the formatted prompt, no explanations.`
         cutComposition: cutCompositionTime,
         fixedElements: fixedElementsTime,
         totalTime: totalTime,
+      });
+
+      // カット割り生成統計を更新
+      setCutGenerationStats({
+        lastGeneratedAt: new Date(),
+        generationTimeMs: cutCompositionTime,
+        cutCount: newCuts.length,
       });
 
       // スタイルプロンプトも設定（要素固定プロンプトをベースに）
@@ -2953,7 +2972,7 @@ ${inputContext}
               <div className="lg:col-span-7 xl:col-span-8 flex flex-col gap-6">
 
               {/* カット割り生成ステータス */}
-              <div className="flex items-center gap-3 px-4 py-2 bg-gradient-to-r from-violet-50 to-purple-50 dark:from-violet-500/5 dark:to-purple-500/5 rounded-xl border border-violet-200 dark:border-violet-500/20">
+              <div className="flex items-center gap-3 px-4 py-2.5 bg-gradient-to-r from-violet-50 to-purple-50 dark:from-violet-500/5 dark:to-purple-500/5 rounded-xl border border-violet-200 dark:border-violet-500/20">
                 <div className="flex items-center gap-2">
                   <div className={`w-2.5 h-2.5 rounded-full ${
                     cuts.length > 0
@@ -2962,13 +2981,43 @@ ${inputContext}
                   }`} />
                   <span className="text-[11px] font-bold text-violet-600 dark:text-violet-400">カット割</span>
                 </div>
-                <span className="text-[11px] font-bold text-gray-800 dark:text-gray-300">
-                  {cuts.length > 0 ? `${enabledCuts.length}カット（全${cuts.length}カット中）` : '未生成'}
-                </span>
-                {cuts.length > 0 && (
-                  <span className="text-[10px] text-gray-500 dark:text-gray-400">
-                    有効: {enabledCuts.length} / 無効: {cuts.length - enabledCuts.length}
+                <div className="flex items-center gap-2 flex-1">
+                  <span className="text-[11px] font-bold text-gray-800 dark:text-gray-300">
+                    {cuts.length > 0 ? `${enabledCuts.length}カット（全${cuts.length}カット中）` : '未生成'}
                   </span>
+                  {cuts.length > 0 && (
+                    <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                      有効: {enabledCuts.length} / 無効: {cuts.length - enabledCuts.length}
+                    </span>
+                  )}
+                </div>
+                {/* 生成統計 */}
+                {cutGenerationStats.lastGeneratedAt && (
+                  <div className="flex items-center gap-3 text-[10px] text-gray-500 dark:text-gray-400 border-l border-violet-200 dark:border-violet-500/20 pl-3">
+                    <div className="flex items-center gap-1">
+                      <span className="text-violet-500">⏱</span>
+                      <span>生成時間:</span>
+                      <span className="font-bold text-gray-700 dark:text-gray-300">
+                        {cutGenerationStats.generationTimeMs ? `${(cutGenerationStats.generationTimeMs / 1000).toFixed(1)}秒` : '-'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-violet-500">📊</span>
+                      <span>平均:</span>
+                      <span className="font-bold text-gray-700 dark:text-gray-300">
+                        {cutGenerationStats.generationTimeMs && cutGenerationStats.cutCount > 0
+                          ? `${(cutGenerationStats.generationTimeMs / cutGenerationStats.cutCount / 1000).toFixed(2)}秒/カット`
+                          : '-'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-violet-500">🕐</span>
+                      <span>生成:</span>
+                      <span className="font-bold text-gray-700 dark:text-gray-300">
+                        {cutGenerationStats.lastGeneratedAt.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  </div>
                 )}
               </div>
 
