@@ -2952,6 +2952,102 @@ ${inputContext}
               {/* Left Column: Composition and Generation Flow */}
               <div className="lg:col-span-7 xl:col-span-8 flex flex-col gap-6">
 
+              {/* カット割り進行ステータス */}
+              <div className="flex items-center gap-3 px-4 py-2.5 bg-gradient-to-r from-violet-50 to-purple-50 dark:from-violet-500/5 dark:to-purple-500/5 rounded-xl border border-violet-200 dark:border-violet-500/20">
+                <div className="flex items-center gap-2">
+                  <div className="w-1 h-4 rounded-full bg-gradient-to-b from-violet-400 to-purple-500"></div>
+                  <span className="text-[10px] font-bold text-violet-600 dark:text-violet-400 uppercase tracking-wider">Progress</span>
+                </div>
+                <div className="flex items-center gap-4 flex-1">
+                  {/* カット割 */}
+                  <div className="flex items-center gap-1.5">
+                    <div className={`w-2 h-2 rounded-full ${
+                      cuts.length > 0
+                        ? 'bg-violet-500 shadow-sm shadow-violet-500/50'
+                        : 'bg-gray-300 dark:bg-gray-600 animate-pulse'
+                    }`} />
+                    <span className="text-[10px] text-gray-600 dark:text-gray-400">カット割</span>
+                    <span className="text-[10px] font-bold text-gray-800 dark:text-gray-300">
+                      {cuts.length > 0 ? `${enabledCuts.length}/${cuts.length}` : '未生成'}
+                    </span>
+                  </div>
+                  {/* 日本語プロンプト */}
+                  <div className="flex items-center gap-1.5">
+                    <div className={`w-2 h-2 rounded-full ${
+                      cuts.filter(c => c.enabled && (c.action || c.expression || c.background)).length === enabledCuts.length && enabledCuts.length > 0
+                        ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50'
+                        : cuts.filter(c => c.enabled && (c.action || c.expression || c.background)).length > 0
+                        ? 'bg-amber-500 shadow-sm shadow-amber-500/50'
+                        : 'bg-gray-300 dark:bg-gray-600'
+                    }`} />
+                    <span className="text-[10px] text-gray-600 dark:text-gray-400">日本語</span>
+                    <span className="text-[10px] font-bold text-gray-800 dark:text-gray-300">
+                      {cuts.filter(c => c.enabled && (c.action || c.expression || c.background)).length}/{enabledCuts.length}
+                    </span>
+                  </div>
+                  {/* 英語プロンプト */}
+                  <div className="flex items-center gap-1.5">
+                    <div className={`w-2 h-2 rounded-full ${
+                      cuts.filter(c => c.enabled && /\[POSITIVE\]/i.test(c.prompt || '')).length === enabledCuts.length && enabledCuts.length > 0
+                        ? 'bg-blue-500 shadow-sm shadow-blue-500/50'
+                        : cuts.filter(c => c.enabled && /\[POSITIVE\]/i.test(c.prompt || '')).length > 0
+                        ? 'bg-amber-500 shadow-sm shadow-amber-500/50'
+                        : 'bg-gray-300 dark:bg-gray-600'
+                    }`} />
+                    <span className="text-[10px] text-gray-600 dark:text-gray-400">英語</span>
+                    <span className="text-[10px] font-bold text-gray-800 dark:text-gray-300">
+                      {cuts.filter(c => c.enabled && /\[POSITIVE\]/i.test(c.prompt || '')).length}/{enabledCuts.length}
+                    </span>
+                  </div>
+                  {/* 画像 */}
+                  <div className="flex items-center gap-1.5">
+                    <div className={`w-2 h-2 rounded-full ${
+                      cuts.filter(c => c.enabled && c.generatedImageUrl).length === enabledCuts.length && enabledCuts.length > 0
+                        ? 'bg-cyan-500 shadow-sm shadow-cyan-500/50'
+                        : cuts.filter(c => c.enabled && c.generatedImageUrl).length > 0
+                        ? 'bg-amber-500 shadow-sm shadow-amber-500/50'
+                        : 'bg-gray-300 dark:bg-gray-600'
+                    }`} />
+                    <span className="text-[10px] text-gray-600 dark:text-gray-400">画像</span>
+                    <span className="text-[10px] font-bold text-gray-800 dark:text-gray-300">
+                      {cuts.filter(c => c.enabled && c.generatedImageUrl).length}/{enabledCuts.length}
+                    </span>
+                  </div>
+                  {/* 動画 */}
+                  <div className="flex items-center gap-1.5">
+                    <div className={`w-2 h-2 rounded-full ${
+                      cuts.filter(c => c.enabled && c.generatedVideoUrl).length === enabledCuts.length && enabledCuts.length > 0
+                        ? 'bg-purple-500 shadow-sm shadow-purple-500/50'
+                        : cuts.filter(c => c.enabled && c.generatedVideoUrl).length > 0
+                        ? 'bg-amber-500 shadow-sm shadow-amber-500/50'
+                        : 'bg-gray-300 dark:bg-gray-600'
+                    }`} />
+                    <span className="text-[10px] text-gray-600 dark:text-gray-400">動画</span>
+                    <span className="text-[10px] font-bold text-gray-800 dark:text-gray-300">
+                      {cuts.filter(c => c.enabled && c.generatedVideoUrl).length}/{enabledCuts.length}
+                    </span>
+                  </div>
+                </div>
+                {/* 進捗バー */}
+                <div className="flex items-center gap-2">
+                  <div className="w-20 h-1.5 bg-gray-200 dark:bg-white/10 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-violet-500 to-purple-500 rounded-full transition-all duration-500"
+                      style={{
+                        width: `${enabledCuts.length > 0
+                          ? ((cuts.filter(c => c.enabled && c.generatedImageUrl).length + cuts.filter(c => c.enabled && c.generatedVideoUrl).length) / (enabledCuts.length * 2)) * 100
+                          : 0}%`
+                      }}
+                    />
+                  </div>
+                  <span className="text-[9px] font-bold text-violet-600 dark:text-violet-400 min-w-[28px] text-right">
+                    {enabledCuts.length > 0
+                      ? Math.round(((cuts.filter(c => c.enabled && c.generatedImageUrl).length + cuts.filter(c => c.enabled && c.generatedVideoUrl).length) / (enabledCuts.length * 2)) * 100)
+                      : 0}%
+                  </span>
+                </div>
+              </div>
+
               {/* Story PDF → Auto Cut Composition */}
               <Suspense fallback={<div className="glass rounded-2xl p-8 text-center"><Loader2 className="animate-spin mx-auto mb-2" size={24} /><p className="text-sm text-gray-500">読み込み中...</p></div>}>
                 <StoryPdfUploader
