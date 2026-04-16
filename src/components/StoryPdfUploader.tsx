@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { FileText, Sparkles, ChevronDown, ChevronUp, Loader2, AlertCircle, Check, BookOpen, Settings2, X, Code2 } from 'lucide-react';
+import { FileText, Sparkles, ChevronDown, ChevronUp, Loader2, AlertCircle, Check, BookOpen, Settings2, X } from 'lucide-react';
 import {
   extractTextFromPdf,
   generateCutComposition,
@@ -24,7 +24,6 @@ interface StoryPdfUploaderProps {
 }
 
 type Step = 'idle' | 'extracting' | 'extracted' | 'generating' | 'done' | 'error';
-type InputMode = 'pdf' | 'json';
 
 const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
   onCutsGenerated,
@@ -39,7 +38,6 @@ const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
 }) => {
   // ─── State ───
   const [step, setStep] = useState<Step>('idle');
-  const [inputMode, setInputMode] = useState<InputMode>('pdf');
   const [showCharacterPopup, setShowCharacterPopup] = useState(false);
   const [pendingText, setPendingText] = useState<string | null>(null);
   const [pdfFile, setPdfFile] = useState<File | null>(null);
@@ -47,8 +45,6 @@ const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [generatedCuts, setGeneratedCuts] = useState<CutCompositionRow[]>([]);
   const [rawAiResponse, setRawAiResponse] = useState('');
-  const [jsonInput, setJsonInput] = useState('');
-  const [jsonError, setJsonError] = useState<string | null>(null);
 
   // レギュレーション & メタプロンプト
   const [regulation, setRegulation] = useState(DEFAULT_REGULATION);
@@ -192,110 +188,6 @@ const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
     }
   };
 
-  // ─── JSON直接入力でカット割り適用 ───
-  const handleJsonImport = () => {
-    setJsonError(null);
-    if (!jsonInput.trim()) {
-      setJsonError('JSONを入力してください');
-      return;
-    }
-
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let arr: any[] = [];
-      let jsonStr = jsonInput.trim();
-
-      // 1. コードフェンスを除去
-      const fencedMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
-      if (fencedMatch) jsonStr = fencedMatch[1].trim();
-
-      // 2. コメント行を除去
-      jsonStr = jsonStr.replace(/^\s*\/\/.*$/gm, '').trim();
-
-      // 3. 末尾カンマを除去
-      jsonStr = jsonStr.replace(/,\s*([\]}])/g, '$1');
-
-      // --- 戦略A: そのまま JSON.parse ---
-      try {
-        const direct = JSON.parse(jsonStr);
-        arr = Array.isArray(direct) ? direct : [direct];
-      } catch {
-        // --- 戦略B: 配列 [...] を抽出 ---
-        const arrayMatch = jsonStr.match(/\[[\s\S]*\]/);
-        if (arrayMatch) {
-          try {
-            const fromArray = JSON.parse(arrayMatch[0]);
-            arr = Array.isArray(fromArray) ? fromArray : [fromArray];
-          } catch {
-            // 配列マッチしたが中身が不正 → 戦略Cへ
-          }
-        }
-
-        // --- 戦略C: 個別オブジェクトを抽出 (ブレース対応) ---
-        if (arr.length === 0) {
-          const objects: string[] = [];
-          let depth = 0;
-          let start = -1;
-          for (let i = 0; i < jsonStr.length; i++) {
-            if (jsonStr[i] === '{') {
-              if (depth === 0) start = i;
-              depth++;
-            } else if (jsonStr[i] === '}') {
-              depth--;
-              if (depth === 0 && start >= 0) {
-                objects.push(jsonStr.substring(start, i + 1));
-                start = -1;
-              }
-            }
-          }
-          if (objects.length > 0) {
-            const combined = '[' + objects.join(',') + ']';
-            arr = JSON.parse(combined);
-          }
-        }
-      }
-
-      if (!arr || arr.length === 0) {
-        throw new Error('有効なJSONデータが見つかりません。JSON配列 [...] またはオブジェクト {...} を入力してください。');
-      }
-
-      // CutCompositionRow に変換
-      const cuts: CutCompositionRow[] = arr.map((item, i) => ({
-        cutNumber: item.cutNumber ?? i + 1,
-        duration: item.duration || '2秒',
-        role: item.role || '',
-        centralEvent: item.centralEvent || '',
-        productEmphasis: item.productEmphasis || '',
-        weightLevel: item.weightLevel || 'レベル3',
-        fromStart: item.fromStart || '',
-        toEnd: item.toEnd || '',
-        camera: item.camera || '',
-        gaze: item.gaze || '',
-        expression: item.expression || '',
-        pose: item.pose || '',
-        walkPosition: item.walkPosition || '',
-        moveDistance: item.moveDistance || '',
-        background: item.background || '',
-        ipPresence: item.ipPresence === true,
-        ipAction: item.ipAction || '',
-        ipExpression: item.ipExpression || '',
-        ipPosition: item.ipPosition || '',
-        tradeOff: item.tradeOff || '',
-        negativeFocus: item.negativeFocus || '',
-      }));
-
-      setGeneratedCuts(cuts);
-      setRawAiResponse(jsonInput);
-      setStep('done');
-      setJsonInput('');
-    } catch (err) {
-      console.error('JSON parse error:', err);
-      // デバッグ用：入力の先頭50文字を表示
-      const preview = jsonInput.trim().substring(0, 80);
-      setJsonError(`JSONパースエラー: ${err instanceof Error ? err.message : '不明なエラー'}\n\n入力プレビュー: ${preview}`);
-    }
-  };
-
   // ─── リセット ───
   const handleReset = () => {
     setStep('idle');
@@ -304,8 +196,6 @@ const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
     setError(null);
     setGeneratedCuts([]);
     setRawAiResponse('');
-    setJsonInput('');
-    setJsonError(null);
   };
 
   return (
@@ -389,7 +279,6 @@ const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
             >
               <option value="openai">ChatGPT (gpt-4o)</option>
               <option value="claude">Claude (claude-sonnet-4)</option>
-              <option value="gemini">Gemini (gemini-2.5-flash)</option>
             </select>
           </div>
 
@@ -457,83 +346,22 @@ const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
 
       {/* ── メインコンテンツ ── */}
       <div className="p-4">
-        {/* Step: Idle — 入力モード選択 + アップロード / JSON入力 / 撮影設定 */}
+        {/* Step: Idle — PDFアップロード */}
         {step === 'idle' && (
-          <div className="space-y-3">
-            {/* タブ切り替え（3タブ） */}
-            <div className="flex rounded-lg border border-[#E0E0E0] dark:border-white/10 overflow-hidden">
-              <button
-                onClick={() => setInputMode('pdf')}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-bold transition-all ${
-                  inputMode === 'pdf'
-                    ? 'bg-violet-500 text-white'
-                    : 'bg-white dark:bg-white/5 text-[#78909C] hover:text-[#333] dark:hover:text-white hover:bg-gray-50 dark:hover:bg-white/10'
-                }`}
-              >
-                <FileText size={13} />
-                PDF
-              </button>
-              <button
-                onClick={() => setInputMode('json')}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-bold transition-all ${
-                  inputMode === 'json'
-                    ? 'bg-violet-500 text-white'
-                    : 'bg-white dark:bg-white/5 text-[#78909C] hover:text-[#333] dark:hover:text-white hover:bg-gray-50 dark:hover:bg-white/10'
-                }`}
-              >
-                <Code2 size={13} />
-                JSON
-              </button>
+          <label className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-violet-300 dark:border-violet-500/30 rounded-xl hover:bg-violet-50 dark:hover:bg-violet-500/5 transition-all cursor-pointer group">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500/10 to-fuchsia-500/10 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+              <FileText size={24} className="text-violet-500 dark:text-violet-400" />
             </div>
-
-            {/* PDF モード */}
-            {inputMode === 'pdf' && (
-              <label className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-violet-300 dark:border-violet-500/30 rounded-xl hover:bg-violet-50 dark:hover:bg-violet-500/5 transition-all cursor-pointer group">
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500/10 to-fuchsia-500/10 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-                  <FileText size={24} className="text-violet-500 dark:text-violet-400" />
-                </div>
-                <span className="text-sm font-bold text-[#333] dark:text-gray-200 mb-1">ストーリーPDFをドロップまたは選択</span>
-                <span className="text-[10px] text-[#78909C] dark:text-gray-500">簡易ストーリー、シナリオ、プロット等のPDF</span>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf"
-                  onChange={handleFileSelect}
-                  className="hidden"
-                />
-              </label>
-            )}
-
-            {/* JSON モード */}
-            {inputMode === 'json' && (
-              <div className="space-y-3">
-                <textarea
-                  value={jsonInput}
-                  onChange={e => { setJsonInput(e.target.value); setJsonError(null); }}
-                  placeholder={`カット割りJSONを貼り付けてください。例:\n[\n  {\n    "cutNumber": 1,\n    "duration": "2.5秒",\n    "role": "状況把握",\n    "centralEvent": "主人公が街を歩いている",\n    "camera": "ミドルロング / 正面",\n    "expression": "穏やか",\n    "background": "都会の街並み",\n    "ipPresence": false\n  }\n]`}
-                  className="w-full h-48 bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl p-3 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-violet-500/50 transition-colors custom-scrollbar resize-y font-mono leading-relaxed placeholder:text-[#B0BEC5] dark:placeholder:text-gray-600"
-                />
-                {jsonError && (
-                  <div className="flex items-center gap-2 p-2.5 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-lg">
-                    <AlertCircle size={13} className="text-red-500 flex-shrink-0" />
-                    <p className="text-[10px] text-red-600 dark:text-red-400 font-medium">{jsonError}</p>
-                  </div>
-                )}
-                <button
-                  onClick={handleJsonImport}
-                  disabled={!jsonInput.trim()}
-                  className={`w-full py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all duration-300 ${
-                    jsonInput.trim()
-                      ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-lg shadow-violet-500/25 hover:shadow-violet-500/40 hover:scale-[1.01]'
-                      : 'bg-gray-200 dark:bg-white/10 text-[#B0BEC5] dark:text-gray-600 cursor-not-allowed'
-                  }`}
-                >
-                  <Code2 size={16} />
-                  JSONからカット割りを取り込む
-                </button>
-              </div>
-            )}
-          </div>
+            <span className="text-sm font-bold text-[#333] dark:text-gray-200 mb-1">ストーリーPDFをドロップまたは選択</span>
+            <span className="text-[10px] text-[#78909C] dark:text-gray-500">簡易ストーリー、シナリオ、プロット等のPDF</span>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf"
+              onChange={handleFileSelect}
+              className="hidden"
+            />
+          </label>
         )}
 
         {/* Step: Extracting — 抽出中 */}

@@ -47,14 +47,13 @@ export function useGenerationSettings() {
   // AIモデル設定
   const [aiModel, setAiModel] = useState<AiModelType>(() => {
     const saved = localStorage.getItem('snafty_ai_model');
-    return (saved as AiModelType) || 'gemini';
+    return (saved as AiModelType) || 'openai';
   });
   const [selectedModelId, setSelectedModelIdState] = useState<string>(() => getSelectedModelId());
   const [availableAiModels] = useState<AiModelVersion[]>(() => getEnabledAiModels());
 
   // APIステータス
   const [apiStatuses, setApiStatuses] = useState<Record<string, ApiStatus>>({
-    gemini: { status: 'checking' },
     openai: { status: 'checking' },
     claude: { status: 'checking' },
     fal: { status: 'checking' },
@@ -90,7 +89,7 @@ export function useGenerationSettings() {
 
   // APIヘルスチェック
   const checkApiHealth = useCallback(async () => {
-    const apis = ['gemini', 'openai', 'claude', 'fal'];
+    const apis = ['openai', 'claude', 'fal'];
 
     for (const api of apis) {
       setApiStatuses(prev => ({ ...prev, [api]: { status: 'checking' } }));

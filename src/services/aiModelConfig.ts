@@ -3,7 +3,7 @@
  * テキスト生成AIモデルの設定を管理
  */
 
-export type AiProvider = 'openai' | 'gemini' | 'claude';
+export type AiProvider = 'openai' | 'claude';
 
 export interface AiModelVersion {
   id: string;
@@ -20,11 +20,6 @@ export const DEFAULT_AI_MODELS: AiModelVersion[] = [
   { id: 'gpt-4o', name: 'GPT-4o', provider: 'openai', apiModel: 'gpt-4o', costPerCall: 0.02, enabled: true },
   { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'openai', apiModel: 'gpt-4o-mini', costPerCall: 0.005, enabled: true },
   { id: 'gpt-4-turbo', name: 'GPT-4 Turbo', provider: 'openai', apiModel: 'gpt-4-turbo', costPerCall: 0.03, enabled: true },
-
-  // Gemini
-  { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', provider: 'gemini', apiModel: 'gemini-1.5-flash', costPerCall: 0.01, enabled: true },
-  { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', provider: 'gemini', apiModel: 'gemini-2.0-flash', costPerCall: 0.008, enabled: true },
-  { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', provider: 'gemini', apiModel: 'gemini-1.5-pro', costPerCall: 0.025, enabled: true },
 
   // Claude
   { id: 'claude-3-5-sonnet', name: 'Claude 3.5 Sonnet', provider: 'claude', apiModel: 'claude-3-5-sonnet-20241022', costPerCall: 0.03, enabled: true },

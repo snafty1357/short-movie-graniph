@@ -174,19 +174,19 @@ export async function extractTextFromPdf(file: File): Promise<string> {
 
 // ─── AI カット割り生成 ───
 
-export type AiModelType = 'openai' | 'gemini' | 'claude';
+export type AiModelType = 'openai' | 'claude';
 
 // モデルIDからエンドポイントとモデル名を取得
 function getModelConfig(modelIdOrType: string): { endpoint: string; modelName: string } {
   console.log('[getModelConfig] Input:', modelIdOrType);
 
-  // 従来のタイプ（openai, gemini, claude）かどうかをチェック
-  const legacyTypes = ['openai', 'gemini', 'claude'];
+  // 従来のタイプ（openai, claude）かどうかをチェック
+  const legacyTypes = ['openai', 'claude'];
   if (legacyTypes.includes(modelIdOrType)) {
     const aiModel = modelIdOrType as AiModelType;
     const result = {
       endpoint: `/api/${aiModel}`,
-      modelName: aiModel === 'openai' ? 'gpt-4o' : aiModel === 'gemini' ? 'gemini-1.5-flash' : 'claude-3-5-sonnet-20241022',
+      modelName: aiModel === 'openai' ? 'gpt-4o' : 'claude-3-5-sonnet-20241022',
     };
     console.log('[getModelConfig] Legacy type result:', result);
     return result;

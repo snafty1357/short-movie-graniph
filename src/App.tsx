@@ -253,7 +253,6 @@ const App: React.FC = () => {
   type ApiStatus = 'checking' | 'ok' | 'error';
   const [apiStatuses, setApiStatuses] = useState<Record<string, ApiStatus>>({
     openai: 'checking',
-    gemini: 'checking',
     claude: 'checking',
   });
 
@@ -275,7 +274,6 @@ const App: React.FC = () => {
       }
     };
     checkApi('openai', 'gpt-4o-mini');
-    checkApi('gemini', 'gemini-2.0-flash');
     checkApi('claude', 'claude-3-haiku-20240307');
   }, []);
 
@@ -285,7 +283,7 @@ const App: React.FC = () => {
       setFixedElementMetaPrompt(savedFixedMeta);
     }
     const savedAiModel = localStorage.getItem('snafty_ai_model') as AiModelType;
-    if (savedAiModel === 'openai' || savedAiModel === 'gemini' || savedAiModel === 'claude') {
+    if (savedAiModel === 'openai' || savedAiModel === 'claude') {
       setAiModel(savedAiModel);
     }
 
@@ -347,7 +345,7 @@ const App: React.FC = () => {
     setRegeneratingCutId(cutId);
     try {
       const aiEndpoint = `/api/${aiModel}`;
-      const aiModelName = aiModel === 'openai' ? 'gpt-4o' : aiModel === 'gemini' ? 'gemini-2.5-flash' : 'claude-sonnet-4-20250514';
+      const aiModelName = aiModel === 'openai' ? 'gpt-4o' : 'claude-sonnet-4-20250514';
 
       const response = await fetch(aiEndpoint, {
         method: 'POST',
@@ -357,16 +355,25 @@ const App: React.FC = () => {
           messages: [
             {
               role: 'system',
-              content: `You are an expert in image generation prompts. Regenerate this cut's prompt into a high-quality English prompt for AI image generation.
+              content: `You are an expert in fal.ai nanobanana 2 image generation prompts. Create optimized prompts using [tag] format.
 
-Create a detailed English prompt that includes:
-- Character pose and expression based on the camera angle
-- Camera angle and composition
-- Action/movement description
-- Background elements
-- Lighting and atmosphere
+Format your output as:
+[POSITIVE]
+[quality], [style], [subject description], [pose/expression], [camera], [background], [lighting]
+[/POSITIVE]
+[NEGATIVE]
+[unwanted elements]
+[/NEGATIVE]
 
-Output ONLY the English prompt text, no JSON or formatting.`
+Guidelines:
+- Use [masterpiece], [best quality], [highly detailed] for quality
+- Use [cinematic lighting], [soft shadows] for lighting
+- Use [full body shot], [medium shot], [close-up] for camera distance
+- Keep subject description clear and specific
+- Include camera angle from the cut settings
+- Separate unwanted elements in NEGATIVE section
+
+Output ONLY the formatted prompt, no explanations.`
             },
             {
               role: 'user',
@@ -425,7 +432,7 @@ IP情報: ${cut.ipPrompt || 'なし'}
     setRegeneratingCutId(cutId);
     try {
       const aiEndpoint = `/api/${aiModel}`;
-      const aiModelName = aiModel === 'openai' ? 'gpt-4o' : aiModel === 'gemini' ? 'gemini-2.5-flash' : 'claude-sonnet-4-20250514';
+      const aiModelName = aiModel === 'openai' ? 'gpt-4o' : 'claude-sonnet-4-20250514';
 
       const response = await fetch(aiEndpoint, {
         method: 'POST',
@@ -435,14 +442,24 @@ IP情報: ${cut.ipPrompt || 'なし'}
           messages: [
             {
               role: 'system',
-              content: `You are an expert translator and prompt engineer for AI image generation.
-Convert the given Japanese scene description fields into a high-quality English prompt for AI image generation.
+              content: `You are an expert in fal.ai nanobanana 2 image generation prompts. Convert Japanese scene descriptions into optimized prompts using [tag] format.
 
-Requirements:
+Format your output as:
+[POSITIVE]
+[quality], [style], [subject description], [pose/expression], [camera], [background], [lighting]
+[/POSITIVE]
+[NEGATIVE]
+[unwanted elements]
+[/NEGATIVE]
+
+Guidelines:
+- Use [masterpiece], [best quality], [highly detailed] for quality
 - Translate each field accurately to English
-- Combine them into a single coherent prompt
-- Use natural English phrasing suitable for image generation
-- Output ONLY the English prompt, no explanations or formatting`
+- Use appropriate camera distance tags: [full body shot], [medium shot], [close-up]
+- Include lighting: [cinematic lighting], [soft shadows], [natural light]
+- Add common negative elements: [blurry], [low quality], [bad anatomy], [extra limbs]
+
+Output ONLY the formatted prompt, no explanations.`
             },
             {
               role: 'user',
@@ -510,7 +527,7 @@ Requirements:
     try {
       // AIで背景プロンプトを生成
       const aiEndpoint = `/api/${aiModel}`;
-      const aiModelName = aiModel === 'openai' ? 'gpt-4o' : aiModel === 'gemini' ? 'gemini-2.5-flash' : 'claude-sonnet-4-20250514';
+      const aiModelName = aiModel === 'openai' ? 'gpt-4o' : 'claude-sonnet-4-20250514';
 
       const promptResponse = await fetch(aiEndpoint, {
         method: 'POST',
@@ -724,7 +741,7 @@ Requirements:
       // Step 3: 各カットのプロンプトを英語で再生成（バックグラウンド）
       // UIブロックせず非同期で実行し、完了次第カットを更新する
       const bgAiEndpoint = `/api/${aiModel}`;
-      const bgAiModelName = aiModel === 'openai' ? 'gpt-4o' : aiModel === 'gemini' ? 'gemini-2.5-flash' : 'claude-sonnet-4-20250514';
+      const bgAiModelName = aiModel === 'openai' ? 'gpt-4o' : 'claude-sonnet-4-20250514';
       const bgCutPrompts = newCuts.map(c => ({
         id: c.id,
         title: c.title,
@@ -747,17 +764,24 @@ Requirements:
               messages: [
                 {
                   role: 'system',
-                  content: `You are an expert in image generation prompts. Regenerate each cut's prompt into high-quality English prompts for AI image generation.
+                  content: `You are an expert in fal.ai nanobanana 2 image generation prompts. Create optimized prompts using [tag] format for each cut.
 
-For each cut, create a detailed English prompt that includes:
-- Character pose and expression
-- Camera angle and composition
-- Action/movement description
-- Background elements
-- Lighting and atmosphere
-- Any IP character actions if present
+For each cut, create a prompt in this format:
+[POSITIVE]
+[quality], [style], [subject description], [pose/expression], [camera], [background], [lighting]
+[/POSITIVE]
+[NEGATIVE]
+[unwanted elements]
+[/NEGATIVE]
 
-Output as JSON array with format: [{"id": number, "prompt": "english prompt here"}, ...]`
+Guidelines:
+- Use [masterpiece], [best quality], [highly detailed] for quality
+- Use [cinematic lighting], [soft shadows] for lighting
+- Include camera settings from the cut data
+- Add IP character description if present
+- Common negatives: [blurry], [low quality], [bad anatomy], [extra limbs], [duplicate]
+
+Output as JSON array: [{"id": number, "prompt": "[POSITIVE]...[/POSITIVE][NEGATIVE]...[/NEGATIVE]"}, ...]`
                 },
                 {
                   role: 'user',
@@ -823,19 +847,36 @@ JSON配列形式で出力してください。`
 
     try {
       const humanDataUrl = await fileToDataUrl(humanFile);
-      let finalPrompt = targetCut.camera ? `Camera angle: ${targetCut.camera}. ${targetCut.prompt}` : targetCut.prompt;
+
+      // プロンプトから[POSITIVE]と[NEGATIVE]セクションを抽出
+      const cutPrompt = targetCut.prompt || '';
+      const positiveMatch = cutPrompt.match(/\[POSITIVE\]([\s\S]*?)\[\/POSITIVE\]/i);
+      const negativeMatch = cutPrompt.match(/\[NEGATIVE\]([\s\S]*?)\[\/NEGATIVE\]/i);
+
+      let positivePrompt = positiveMatch ? positiveMatch[1].trim() : cutPrompt;
+      let negativePrompt = negativeMatch ? negativeMatch[1].trim() : '';
+
+      // カメラ設定を追加
+      if (targetCut.camera) {
+        positivePrompt = `[${targetCut.camera}], ${positivePrompt}`;
+      }
+
       // メインキャラクターのプロンプトと詳細を追加
       const mainDetailPrompt = getMainCharDetailPrompt();
       const mainPromptParts = [mainCharPrompt, mainCustomPrompt, mainDetailPrompt].filter(Boolean).join(', ');
       if (mainPromptParts) {
-        finalPrompt = `${mainPromptParts}, ${finalPrompt}`;
+        positivePrompt = `${mainPromptParts}, ${positivePrompt}`;
       }
+
+      // スタイルと背景を追加
       const combinedBase = [stillImageStyle, stagePrompt].filter(Boolean).join(', ');
       if (combinedBase) {
-        finalPrompt = `${combinedBase}, ${finalPrompt}`;
+        positivePrompt = `${combinedBase}, ${positivePrompt}`;
       }
+
+      // ネガティブプロンプトを統合
       if (stillImageNegative) {
-        finalPrompt += ` (negative: ${stillImageNegative})`;
+        negativePrompt = negativePrompt ? `${negativePrompt}, ${stillImageNegative}` : stillImageNegative;
       }
 
       // サブキャラクター（IP）の設定
@@ -845,8 +886,11 @@ JSON配列形式で出力してください。`
         subCharDataUrl = await fileToDataUrl(subCharFile);
         const subDetailPrompt = getSubCharDetailPrompt();
         ipDescription = [targetCut.ipPrompt || subCharPrompt, subDetailPrompt].filter(Boolean).join(', ');
-        finalPrompt += `, with a small companion character: ${ipDescription}`;
+        positivePrompt += `, [companion character: ${ipDescription}]`;
       }
+
+      // 最終プロンプトを[POSITIVE][NEGATIVE]形式で構築
+      const finalPrompt = `[POSITIVE]\n${positivePrompt}\n[/POSITIVE]\n[NEGATIVE]\n${negativePrompt || '[blurry], [low quality], [bad anatomy]'}\n[/NEGATIVE]`;
 
       const result = await generatePose({
         humanImageUrl: humanDataUrl,
@@ -1008,22 +1052,42 @@ JSON配列形式で出力してください。`
       // 全カットを同時に生成
       const generatePromises = enabledCutsToGenerate.map(async (cut) => {
         try {
-          let finalPrompt = cut.camera ? `Camera angle: ${cut.camera}. ${cut.prompt}` : cut.prompt;
+          // プロンプトから[POSITIVE]と[NEGATIVE]セクションを抽出
+          const cutPrompt = cut.prompt || '';
+          const positiveMatch = cutPrompt.match(/\[POSITIVE\]([\s\S]*?)\[\/POSITIVE\]/i);
+          const negativeMatch = cutPrompt.match(/\[NEGATIVE\]([\s\S]*?)\[\/NEGATIVE\]/i);
+
+          let positivePrompt = positiveMatch ? positiveMatch[1].trim() : cutPrompt;
+          let negativePrompt = negativeMatch ? negativeMatch[1].trim() : '';
+
+          // カメラ設定を追加
+          if (cut.camera) {
+            positivePrompt = `[${cut.camera}], ${positivePrompt}`;
+          }
+
           // メインキャラクターのプロンプトと詳細を追加
           const mainPromptParts = [mainCharPrompt, mainCustomPrompt, mainDetailPrompt].filter(Boolean).join(', ');
           if (mainPromptParts) {
-            finalPrompt = `${mainPromptParts}, ${finalPrompt}`;
+            positivePrompt = `${mainPromptParts}, ${positivePrompt}`;
           }
           if (combinedBase) {
-            finalPrompt = `${combinedBase}, ${finalPrompt}`;
+            positivePrompt = `${combinedBase}, ${positivePrompt}`;
           }
+
+          // ネガティブプロンプトを統合
           if (stillImageNegative) {
-            finalPrompt += ` (negative: ${stillImageNegative})`;
+            negativePrompt = negativePrompt ? `${negativePrompt}, ${stillImageNegative}` : stillImageNegative;
           }
 
           // IPキャラクターの処理
           const useSubChar = cut.showSub && subCharDataUrl && subCharPrompt;
           const ipDescription = [cut.ipPrompt || subCharPrompt || '', subDetailPrompt].filter(Boolean).join(', ');
+          if (useSubChar && ipDescription) {
+            positivePrompt += `, [companion character: ${ipDescription}]`;
+          }
+
+          // 最終プロンプトを[POSITIVE][NEGATIVE]形式で構築
+          const finalPrompt = `[POSITIVE]\n${positivePrompt}\n[/POSITIVE]\n[NEGATIVE]\n${negativePrompt || '[blurry], [low quality], [bad anatomy]'}\n[/NEGATIVE]`;
 
           const result = await generatePose({
             humanImageUrl: humanDataUrl,
@@ -1545,7 +1609,6 @@ ${inputContext}
             <div className="flex items-center gap-1.5 ml-2 px-2.5 py-1.5 bg-gray-50 dark:bg-white/5 rounded-lg border border-gray-200 dark:border-white/10">
               {([
                 { key: 'openai', label: 'GPT' },
-                { key: 'gemini', label: 'Gem' },
                 { key: 'claude', label: 'Cld' },
               ] as const).map(({ key, label }) => (
                 <div key={key} className="flex items-center gap-1" title={`${label}: ${apiStatuses[key] === 'ok' ? '稼働中' : apiStatuses[key] === 'error' ? 'エラー' : 'チェック中'}`}>
@@ -1569,28 +1632,35 @@ ${inputContext}
             <div className="flex items-center gap-1.5 bg-gray-100 dark:bg-white/5 rounded-xl px-2 py-1.5 border border-gray-200 dark:border-white/10">
               <Sparkles size={12} className="text-purple-500" />
               <span className="text-[9px] font-bold text-gray-500 dark:text-gray-400 mr-1">AI:</span>
-              {(['openai', 'gemini', 'claude'] as const).map((model) => (
-                <button
-                  key={model}
-                  onClick={() => {
-                    setAiModel(model);
-                    localStorage.setItem('snafty_ai_model', model);
-                  }}
-                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
-                    aiModel === model
-                      ? apiStatuses[model] === 'error'
-                        ? 'bg-red-500 text-white shadow-sm shadow-red-500/30'
-                        : model === 'openai'
-                        ? 'bg-green-500 text-white shadow-sm shadow-green-500/30'
-                        : model === 'gemini'
-                        ? 'bg-blue-500 text-white shadow-sm shadow-blue-500/30'
-                        : 'bg-orange-500 text-white shadow-sm shadow-orange-500/30'
-                      : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/10'
-                  }`}
-                >
-                  {model === 'openai' ? 'GPT-4o' : model === 'gemini' ? 'Gemini' : 'Claude'}
-                </button>
-              ))}
+              {(['openai', 'claude'] as const).map((provider) => {
+                // 現在選択中のモデルがこのプロバイダーのものか確認
+                const currentModelProvider = availableAiModels.find(m => m.id === selectedModelId)?.provider;
+                const isSelected = currentModelProvider === provider;
+                // このプロバイダーのデフォルトモデル
+                const defaultModelId = provider === 'openai' ? 'gpt-4o' : 'claude-3-5-sonnet';
+                // 現在選択中のモデル名（このプロバイダーの場合）
+                const currentModelName = isSelected
+                  ? availableAiModels.find(m => m.id === selectedModelId)?.name || (provider === 'openai' ? 'GPT-4o' : 'Claude')
+                  : (provider === 'openai' ? 'GPT-4o' : 'Claude');
+
+                return (
+                  <button
+                    key={provider}
+                    onClick={() => handleModelIdChange(defaultModelId)}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
+                      isSelected
+                        ? apiStatuses[provider] === 'error'
+                          ? 'bg-red-500 text-white shadow-sm shadow-red-500/30'
+                          : provider === 'openai'
+                          ? 'bg-green-500 text-white shadow-sm shadow-green-500/30'
+                          : 'bg-orange-500 text-white shadow-sm shadow-orange-500/30'
+                        : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/10'
+                    }`}
+                  >
+                    {currentModelName}
+                  </button>
+                );
+              })}
             </div>
 
             {/* Camera Settings Button */}
@@ -2709,16 +2779,11 @@ ${inputContext}
                       value={selectedModelId}
                       onChange={(e) => handleModelIdChange(e.target.value)}
                       className={`text-[10px] font-bold bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded px-1.5 py-0.5 cursor-pointer max-w-[120px] ${
-                        aiModel === 'openai' ? 'text-green-600' : aiModel === 'gemini' ? 'text-blue-600' : 'text-orange-600'
+                        aiModel === 'openai' ? 'text-green-600' : 'text-orange-600'
                       }`}
                     >
                       <optgroup label="OpenAI" className="text-green-600">
                         {availableAiModels.filter(m => m.provider === 'openai').map(m => (
-                          <option key={m.id} value={m.id}>{m.name}</option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="Google" className="text-blue-600">
-                        {availableAiModels.filter(m => m.provider === 'gemini').map(m => (
                           <option key={m.id} value={m.id}>{m.name}</option>
                         ))}
                       </optgroup>
@@ -2975,6 +3040,85 @@ ${inputContext}
                   </button>
                 </div>
               </div>
+
+              {/* ステータスバー */}
+              {cuts.length > 0 && (
+                <div className="flex items-center gap-3 px-3 py-2 bg-gray-50 dark:bg-white/[0.02] rounded-xl border border-gray-200 dark:border-white/5 mb-3">
+                  <span className="text-[9px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Status</span>
+                  <div className="flex items-center gap-4 flex-1">
+                    {/* 日本語プロンプト */}
+                    <div className="flex items-center gap-1.5">
+                      <div className={`w-2 h-2 rounded-full ${
+                        cuts.filter(c => c.enabled && (c.action || c.expression || c.background || /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(c.prompt || ''))).length > 0
+                          ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50'
+                          : 'bg-gray-300 dark:bg-gray-600'
+                      }`} />
+                      <span className="text-[10px] text-gray-600 dark:text-gray-400">日本語</span>
+                      <span className="text-[10px] font-bold text-gray-800 dark:text-gray-300">
+                        {cuts.filter(c => c.enabled && (c.action || c.expression || c.background || /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(c.prompt || ''))).length}/{enabledCuts.length}
+                      </span>
+                    </div>
+                    {/* 英語プロンプト */}
+                    <div className="flex items-center gap-1.5">
+                      <div className={`w-2 h-2 rounded-full ${
+                        cuts.filter(c => c.enabled && /\[POSITIVE\]/i.test(c.prompt || '')).length > 0
+                          ? 'bg-blue-500 shadow-sm shadow-blue-500/50'
+                          : 'bg-gray-300 dark:bg-gray-600'
+                      }`} />
+                      <span className="text-[10px] text-gray-600 dark:text-gray-400">英語</span>
+                      <span className="text-[10px] font-bold text-gray-800 dark:text-gray-300">
+                        {cuts.filter(c => c.enabled && /\[POSITIVE\]/i.test(c.prompt || '')).length}/{enabledCuts.length}
+                      </span>
+                    </div>
+                    {/* 画像生成 */}
+                    <div className="flex items-center gap-1.5">
+                      <div className={`w-2 h-2 rounded-full ${
+                        cuts.filter(c => c.enabled && c.generatedImageUrl).length === enabledCuts.length && enabledCuts.length > 0
+                          ? 'bg-cyan-500 shadow-sm shadow-cyan-500/50'
+                          : cuts.filter(c => c.enabled && c.generatedImageUrl).length > 0
+                          ? 'bg-amber-500 shadow-sm shadow-amber-500/50'
+                          : 'bg-gray-300 dark:bg-gray-600'
+                      }`} />
+                      <span className="text-[10px] text-gray-600 dark:text-gray-400">画像</span>
+                      <span className="text-[10px] font-bold text-gray-800 dark:text-gray-300">
+                        {cuts.filter(c => c.enabled && c.generatedImageUrl).length}/{enabledCuts.length}
+                      </span>
+                    </div>
+                    {/* 動画生成 */}
+                    <div className="flex items-center gap-1.5">
+                      <div className={`w-2 h-2 rounded-full ${
+                        cuts.filter(c => c.enabled && c.generatedVideoUrl).length === enabledCuts.length && enabledCuts.length > 0
+                          ? 'bg-purple-500 shadow-sm shadow-purple-500/50'
+                          : cuts.filter(c => c.enabled && c.generatedVideoUrl).length > 0
+                          ? 'bg-amber-500 shadow-sm shadow-amber-500/50'
+                          : 'bg-gray-300 dark:bg-gray-600'
+                      }`} />
+                      <span className="text-[10px] text-gray-600 dark:text-gray-400">動画</span>
+                      <span className="text-[10px] font-bold text-gray-800 dark:text-gray-300">
+                        {cuts.filter(c => c.enabled && c.generatedVideoUrl).length}/{enabledCuts.length}
+                      </span>
+                    </div>
+                  </div>
+                  {/* 進捗バー */}
+                  <div className="flex items-center gap-2 ml-auto">
+                    <div className="w-24 h-1.5 bg-gray-200 dark:bg-white/10 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-cyan-500 to-purple-500 rounded-full transition-all duration-500"
+                        style={{
+                          width: `${enabledCuts.length > 0
+                            ? ((cuts.filter(c => c.enabled && c.generatedImageUrl).length + cuts.filter(c => c.enabled && c.generatedVideoUrl).length) / (enabledCuts.length * 2)) * 100
+                            : 0}%`
+                        }}
+                      />
+                    </div>
+                    <span className="text-[9px] font-bold text-gray-500 dark:text-gray-400">
+                      {enabledCuts.length > 0
+                        ? Math.round(((cuts.filter(c => c.enabled && c.generatedImageUrl).length + cuts.filter(c => c.enabled && c.generatedVideoUrl).length) / (enabledCuts.length * 2)) * 100)
+                        : 0}%
+                    </span>
+                  </div>
+                </div>
+              )}
 
               <div className="space-y-2">
                 {cuts.length === 0 ? (

@@ -149,20 +149,25 @@ export async function generateTryOn(request: TryOnRequest): Promise<TryOnResult>
   // 解像度を取得
   const size = request.resolution ? RESOLUTION_MAP[request.resolution] : 1024;
 
-  // ポジティブプロンプトのみ抽出（セクションタグを除去）
-  let prompt = request.description || 'A person wearing this garment naturally';
-  prompt = prompt
-    .replace(/===.*?===/g, '')
-    .replace(/\[.*?\]/g, '')
-    .replace(/\n+/g, ' ')
-    .trim();
+  // [POSITIVE]と[NEGATIVE]セクションを抽出
+  const description = request.description || 'A person wearing this garment naturally';
+  const positiveMatch = description.match(/\[POSITIVE\]([\s\S]*?)\[\/POSITIVE\]/i);
+  const negativeMatch = description.match(/\[NEGATIVE\]([\s\S]*?)\[\/NEGATIVE\]/i);
+
+  let prompt = positiveMatch ? positiveMatch[1].trim() : description;
+  let negativePrompt = negativeMatch ? negativeMatch[1].trim() : (request.negativePrompt || '');
+
+  // タグを[]形式で維持しつつ、改行を空白に
+  prompt = prompt.replace(/\n+/g, ' ').trim();
+  negativePrompt = negativePrompt.replace(/\n+/g, ' ').trim();
 
   // プロンプトが長すぎる場合は切り詰め
   if (prompt.length > 1000) {
     prompt = prompt.substring(0, 1000);
   }
 
-  console.log('[TryOn] Final prompt:', prompt.substring(0, 200) + '...');
+  console.log('[TryOn] Positive prompt:', prompt.substring(0, 200) + '...');
+  console.log('[TryOn] Negative prompt:', negativePrompt.substring(0, 100) + '...');
 
   // 解像度をAPIの形式に変換
   const resolutionMap: Record<number, string> = {
@@ -280,7 +285,7 @@ export interface PoseGenerationRequest {
  */
 export async function generatePose(request: PoseGenerationRequest): Promise<TryOnResult> {
   console.log('[PoseGen] Starting generation with Nano Banana 2...');
-  console.log('[PoseGen] Detailed pose:', request.pose);
+  console.log('[PoseGen] Input pose/prompt:', request.pose?.substring(0, 200));
 
   const resolutionMap: Record<number, string> = {
     1024: '1K',
@@ -290,12 +295,27 @@ export async function generatePose(request: PoseGenerationRequest): Promise<TryO
 
   const size = request.resolution ? RESOLUTION_MAP[request.resolution] : 1024;
 
-  // プロンプトを構築（IPキャラクターがある場合は追加）
-  let prompt = `Change the posture of the person in the image to strike exactly a ${request.pose} pose. Strictly preserve their face identity, features, and their current clothing exactly as it is.`;
+  // [POSITIVE]と[NEGATIVE]セクションを抽出
+  const poseInput = request.pose || '';
+  const positiveMatch = poseInput.match(/\[POSITIVE\]([\s\S]*?)\[\/POSITIVE\]/i);
+  const negativeMatch = poseInput.match(/\[NEGATIVE\]([\s\S]*?)\[\/NEGATIVE\]/i);
+
+  let positivePrompt = positiveMatch ? positiveMatch[1].trim() : poseInput;
+  let negativePrompt = negativeMatch ? negativeMatch[1].trim() : '[blurry], [low quality], [bad anatomy], [extra limbs]';
+
+  // 改行を空白に変換
+  positivePrompt = positivePrompt.replace(/\n+/g, ' ').trim();
+  negativePrompt = negativePrompt.replace(/\n+/g, ' ').trim();
+
+  // プロンプトを構築（人物のアイデンティティ保持指示を追加）
+  let prompt = `${positivePrompt}. Strictly preserve the person's face identity, features, and their current clothing exactly as shown in the reference image.`;
 
   if (request.subCharacterImageUrl && request.subCharacterPrompt) {
     prompt += ` Also include a companion character in the scene: ${request.subCharacterPrompt}. Place the companion character naturally within the composition.`;
   }
+
+  console.log('[PoseGen] Positive prompt:', prompt.substring(0, 200) + '...');
+  console.log('[PoseGen] Negative prompt:', negativePrompt.substring(0, 100) + '...');
 
   // 画像配列を構築
   const imageUrls = [request.humanImageUrl];
@@ -305,6 +325,7 @@ export async function generatePose(request: PoseGenerationRequest): Promise<TryO
 
   const submitResult = await falRequest('fal-ai/nano-banana-2/edit', 'POST', {
     prompt: prompt,
+    negative_prompt: negativePrompt,
     image_urls: imageUrls,
     resolution: resolutionMap[size] || '1K',
     num_images: 1,
