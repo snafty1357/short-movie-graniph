@@ -259,7 +259,6 @@ const App: React.FC = () => {
     generationTimeMs: null,
     cutCount: 0,
   });
-  const [cutGenerationStartTime, setCutGenerationStartTime] = useState<number | null>(null);
 
   // ─── API稼働状況チェック ───
   type ApiStatus = 'checking' | 'ok' | 'error';
