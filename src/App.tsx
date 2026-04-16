@@ -673,6 +673,46 @@ Output ONLY the formatted prompt, no explanations.`
     }
   };
 
+  // 動画のダウンロード
+  const downloadVideo = async (videoUrl: string, cutTitle: string, cutIndex: number) => {
+    try {
+      const response = await fetch(videoUrl);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const timestamp = new Date().toISOString().slice(0, 10);
+      a.download = `cut${String(cutIndex + 1).padStart(2, '0')}_${timestamp}_${cutTitle.replace(/[^a-zA-Z0-9\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/g, '_')}.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Video download error:', err);
+      alert('動画のダウンロードに失敗しました');
+    }
+  };
+
+  // 全動画を一括ダウンロード
+  const [isDownloadingVideos, setIsDownloadingVideos] = useState(false);
+  const downloadAllVideos = async () => {
+    const cutsWithVideos = cuts.filter(c => c.enabled && c.generatedVideoUrl);
+    if (cutsWithVideos.length === 0) {
+      alert('ダウンロードする動画がありません');
+      return;
+    }
+    setIsDownloadingVideos(true);
+    for (let i = 0; i < cutsWithVideos.length; i++) {
+      const cut = cutsWithVideos[i];
+      if (cut.generatedVideoUrl) {
+        const originalIndex = cuts.findIndex(c => c.id === cut.id);
+        await downloadVideo(cut.generatedVideoUrl, cut.title, originalIndex);
+        await new Promise(resolve => setTimeout(resolve, 800)); // 少し間隔を空ける
+      }
+    }
+    setIsDownloadingVideos(false);
+  };
+
   // ─── PDF自動生成フロー ───
   const handleFullAutoGenerate = async (pdfText: string) => {
     const totalStartTime = Date.now();
@@ -3098,6 +3138,21 @@ ${inputContext}
                     {isGeneratingVideos ? `動画生成中... (${cuts.filter(c => c.isGeneratingVideo).length > 0 ? cuts.findIndex(c => c.isGeneratingVideo) + 1 : 0}/${enabledCuts.filter(c => c.generatedImageUrl && !c.generatedVideoUrl).length})` : '一括動画生成'}
                   </button>
 
+                  {/* 一括動画ダウンロードボタン */}
+                  <button
+                    onClick={downloadAllVideos}
+                    disabled={isDownloadingVideos || cuts.filter(c => c.enabled && c.generatedVideoUrl).length === 0}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all shadow-sm ${
+                      isDownloadingVideos || cuts.filter(c => c.enabled && c.generatedVideoUrl).length === 0
+                        ? 'bg-gray-100 dark:bg-white/5 text-[#9E9E9E] dark:text-gray-500 cursor-not-allowed border outline-none'
+                        : 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white shadow-cyan-500/20 hover:shadow-cyan-500/40 hover:scale-105'
+                    }`}
+                    title={`${cuts.filter(c => c.enabled && c.generatedVideoUrl).length}本の動画をダウンロード`}
+                  >
+                    {isDownloadingVideos ? <Loader2 size={10} className="animate-spin" /> : <Download size={10} />}
+                    {isDownloadingVideos ? 'ダウンロード中...' : `動画DL (${cuts.filter(c => c.enabled && c.generatedVideoUrl).length})`}
+                  </button>
+
                   <div className="relative" ref={semanticPanelRef}>
                     <button
                       onClick={() => setSemanticPanelOpen(!semanticPanelOpen)}
@@ -3333,6 +3388,20 @@ ${inputContext}
                             <div className="absolute top-0.5 left-0.5 bg-purple-500 text-white text-[6px] px-1 py-0.5 rounded font-bold">
                               🎬
                             </div>
+                          )}
+
+                          {/* Download button on hover */}
+                          {cut.generatedVideoUrl && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                downloadVideo(cut.generatedVideoUrl!, cut.title, index);
+                              }}
+                              className="absolute bottom-0.5 right-0.5 bg-black/60 hover:bg-black/80 text-white p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                              title="動画をダウンロード"
+                            >
+                              <Download size={8} />
+                            </button>
                           )}
                         </div>
 
