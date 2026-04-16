@@ -1704,62 +1704,50 @@ ${inputContext}
               </h1>
               <p className="text-[10px] text-[#78909C] dark:text-gray-500 -mt-0.5 tracking-widest font-medium">Short Movie AI Generator</p>
             </div>
-            {/* API Status Indicators */}
+            {/* API Status Indicator (GPT only) */}
             <div className="flex items-center gap-1.5 ml-2 px-2.5 py-1.5 bg-gray-50 dark:bg-white/5 rounded-lg border border-gray-200 dark:border-white/10">
-              {([
-                { key: 'openai', label: 'GPT' },
-                { key: 'claude', label: 'Cld' },
-              ] as const).map(({ key, label }) => (
-                <div key={key} className="flex items-center gap-1" title={`${label}: ${apiStatuses[key] === 'ok' ? '稼働中' : apiStatuses[key] === 'error' ? 'エラー' : 'チェック中'}`}>
-                  <div className={`w-1.5 h-1.5 rounded-full ${
-                    apiStatuses[key] === 'ok' ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50' :
-                    apiStatuses[key] === 'error' ? 'bg-red-500 shadow-sm shadow-red-500/50' :
-                    'bg-gray-400 animate-pulse'
-                  }`} />
-                  <span className={`text-[8px] font-bold ${
-                    apiStatuses[key] === 'ok' ? 'text-emerald-600 dark:text-emerald-400' :
-                    apiStatuses[key] === 'error' ? 'text-red-500 dark:text-red-400' :
-                    'text-gray-400'
-                  }`}>{label}</span>
-                </div>
-              ))}
+              <div className="flex items-center gap-1" title={`GPT: ${apiStatuses['openai'] === 'ok' ? '稼働中' : apiStatuses['openai'] === 'error' ? 'エラー' : 'チェック中'}`}>
+                <div className={`w-1.5 h-1.5 rounded-full ${
+                  apiStatuses['openai'] === 'ok' ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50' :
+                  apiStatuses['openai'] === 'error' ? 'bg-red-500 shadow-sm shadow-red-500/50' :
+                  'bg-gray-400 animate-pulse'
+                }`} />
+                <span className={`text-[8px] font-bold ${
+                  apiStatuses['openai'] === 'ok' ? 'text-emerald-600 dark:text-emerald-400' :
+                  apiStatuses['openai'] === 'error' ? 'text-red-500 dark:text-red-400' :
+                  'text-gray-400'
+                }`}>GPT</span>
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-3">
 
-            {/* AI Model Selector - Global */}
+            {/* AI Model Selector - Global (GPT only) */}
             <div className="flex items-center gap-1.5 bg-gray-100 dark:bg-white/5 rounded-xl px-2 py-1.5 border border-gray-200 dark:border-white/10">
               <Sparkles size={12} className="text-purple-500" />
               <span className="text-[9px] font-bold text-gray-500 dark:text-gray-400 mr-1">AI:</span>
-              {(['openai', 'claude'] as const).map((provider) => {
-                // 現在選択中のモデルがこのプロバイダーのものか確認
+              {(() => {
                 const currentModelProvider = availableAiModels.find(m => m.id === selectedModelId)?.provider;
-                const isSelected = currentModelProvider === provider;
-                // このプロバイダーのデフォルトモデル
-                const defaultModelId = provider === 'openai' ? 'gpt-4o' : 'claude-3-5-sonnet';
-                // 現在選択中のモデル名（このプロバイダーの場合）
+                const isSelected = currentModelProvider === 'openai';
                 const currentModelName = isSelected
-                  ? availableAiModels.find(m => m.id === selectedModelId)?.name || (provider === 'openai' ? 'GPT-4o' : 'Claude')
-                  : (provider === 'openai' ? 'GPT-4o' : 'Claude');
+                  ? availableAiModels.find(m => m.id === selectedModelId)?.name || 'GPT-4o'
+                  : 'GPT-4o';
 
                 return (
                   <button
-                    key={provider}
-                    onClick={() => handleModelIdChange(defaultModelId)}
+                    onClick={() => handleModelIdChange('gpt-4o')}
                     className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
                       isSelected
-                        ? apiStatuses[provider] === 'error'
+                        ? apiStatuses['openai'] === 'error'
                           ? 'bg-red-500 text-white shadow-sm shadow-red-500/30'
-                          : provider === 'openai'
-                          ? 'bg-green-500 text-white shadow-sm shadow-green-500/30'
-                          : 'bg-orange-500 text-white shadow-sm shadow-orange-500/30'
+                          : 'bg-green-500 text-white shadow-sm shadow-green-500/30'
                         : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/10'
                     }`}
                   >
                     {currentModelName}
                   </button>
                 );
-              })}
+              })()}
             </div>
 
             {/* Camera Settings Button */}
