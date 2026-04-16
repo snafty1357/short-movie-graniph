@@ -12,7 +12,7 @@ const ShortVideoModal = lazy(() => import('./components/ShortVideoModal'));
 const StoryPdfUploader = lazy(() => import('./components/StoryPdfUploader'));
 const StoryboardWorkflowModal = lazy(() => import('./components/StoryboardWorkflowModal'));
 
-import { User, Users, Sun, Moon, UserCircle, RotateCcw, RefreshCw, Pencil, ChevronDown, Sparkles, Image as ImageIcon, Loader2, Upload, Play, BookOpen, History, Save, Trash2, FolderOpen, Maximize2, X, Plus, Search, Download, Camera, Aperture, Focus, Film, Video } from 'lucide-react';
+import { User, Users, Sun, Moon, UserCircle, RotateCcw, RefreshCw, Pencil, ChevronDown, Sparkles, Image as ImageIcon, Loader2, Upload, Play, BookOpen, History, Save, Trash2, FolderOpen, Maximize2, X, Plus, Search, Download, Camera, Aperture, Focus, Film, Video, Layers } from 'lucide-react';
 import { generatePose, fileToDataUrl, generateKlingVideo } from './services/falService';
 import { generateFixedElements, generateCutComposition, compositionRowToCutItem, DEFAULT_FIXED_META_PROMPT, DEFAULT_REGULATION, DEFAULT_META_PROMPT, type AiModelType } from './services/storyPdfService';
 import { getEnabledAiModels, getSelectedModelId, setSelectedModelId, getProviderFromModelId, type AiModelVersion } from './services/aiModelConfig';
@@ -3469,6 +3469,81 @@ ${inputContext}
                           {cut.generatedImageUrl && (
                             <div className="absolute top-0.5 left-0.5 bg-cyan-500 text-white text-[6px] px-1 py-0.5 rounded font-bold">
                               📷
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Background Image Thumbnail */}
+                        <div className="relative w-11 h-[78px] rounded-md border border-emerald-300 dark:border-emerald-500/30 shadow-sm overflow-hidden group bg-emerald-50 dark:bg-emerald-500/5 flex items-center justify-center">
+                          {cut.backgroundImageUrl ? (
+                            <img
+                              src={cut.backgroundImageUrl}
+                              alt="bg"
+                              className="w-full h-full object-cover cursor-pointer"
+                              onClick={() => setLightboxImage({ url: cut.backgroundImageUrl!, title: `${cut.title} - 背景` })}
+                            />
+                          ) : (
+                            <Layers size={14} className="text-emerald-300 dark:text-emerald-500/50 opacity-50" />
+                          )}
+
+                          {cut.isGeneratingBackground && (
+                            <div className="absolute inset-0 bg-emerald-900/70 flex flex-col justify-center items-center">
+                              <Loader2 size={10} className="text-white animate-spin" />
+                              <span className="text-[6px] text-white mt-0.5">背景生成中</span>
+                            </div>
+                          )}
+
+                          {/* Background badge */}
+                          {cut.backgroundImageUrl && (
+                            <div className="absolute top-0.5 left-0.5 bg-emerald-500 text-white text-[6px] px-1 py-0.5 rounded font-bold">
+                              🏞️
+                            </div>
+                          )}
+
+                          {/* Hover controls */}
+                          {!cut.isGeneratingBackground && (
+                            <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              {cut.backgroundImageUrl && (
+                                <>
+                                  <button
+                                    onClick={() => setLightboxImage({ url: cut.backgroundImageUrl!, title: `${cut.title} - 背景` })}
+                                    className="text-white hover:text-emerald-400 p-1 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+                                    title="拡大表示"
+                                  >
+                                    <Maximize2 size={10} />
+                                  </button>
+                                  <button
+                                    onClick={() => downloadBackgroundImage(cut.backgroundImageUrl!, cut.title)}
+                                    className="text-white hover:text-blue-400 p-1 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+                                    title="ダウンロード"
+                                  >
+                                    <Download size={10} />
+                                  </button>
+                                </>
+                              )}
+                              <label className="text-white hover:text-cyan-400 p-1 rounded-full bg-white/10 hover:bg-white/20 cursor-pointer transition-colors" title="背景画像を差し替え">
+                                <Upload size={10} />
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  className="hidden"
+                                  onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) {
+                                      const url = URL.createObjectURL(file);
+                                      setCuts(prev => prev.map(c => c.id === cut.id ? { ...c, backgroundImageUrl: url } : c));
+                                    }
+                                    e.target.value = '';
+                                  }}
+                                />
+                              </label>
+                              <button
+                                onClick={() => generateBackgroundForCut(cut.id)}
+                                className="text-white hover:text-emerald-400 p-1 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+                                title="背景を再生成"
+                              >
+                                <RotateCcw size={10} />
+                              </button>
                             </div>
                           )}
                         </div>
