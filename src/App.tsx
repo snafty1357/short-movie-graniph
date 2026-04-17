@@ -3733,6 +3733,7 @@ ${inputContext}
                                   className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50"
                                 />
                               </div>
+                            </div>
                           </div>
                         )}
 
