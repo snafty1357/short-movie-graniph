@@ -498,6 +498,24 @@ Output ONLY the formatted prompt, no explanations.`
     }
   };
 
+  // 詳細フィールドから動画用英語プロンプトを生成
+  const regenerateVideoPromptFromFields = async (cutId: number) => {
+    const cut = cuts.find(c => c.id === cutId);
+    if (!cut) return;
+
+    setRegeneratingCutId(cutId);
+    try {
+      let vPrompt = generateVideoPromptFromSettings(cut);
+      vPrompt = await translateVideoPrompt(vPrompt);
+      setCuts(prev => prev.map(c => c.id === cutId ? { ...c, videoPrompt: vPrompt } : c));
+    } catch (err) {
+      console.error('Video prompt regeneration error:', err);
+      alert('動画プロンプト英語化に失敗しました: ' + (err instanceof Error ? err.message : '不明なエラー'));
+    } finally {
+      setRegeneratingCutId(null);
+    }
+  };
+
   const handleUploadCutImage = (cutId: number, file: File) => {
     const url = URL.createObjectURL(file);
     setCuts(prev => prev.map(c => c.id === cutId ? { ...c, generatedImageUrl: url } : c));
@@ -1041,6 +1059,51 @@ JSON配列形式で出力してください。`
     return parts.join('. ');
   };
 
+  // 日本語が含まれる動画プロンプトを英語に自動翻訳
+  const translateVideoPrompt = async (prompt: string): Promise<string> => {
+    // 日本語が含まれていない場合はそのまま返す
+    if (!prompt.match(/[\u3000-\u303f\u3040-\u309f\u30a0-\u30ff\uff00-\uff9f\u4e00-\u9faf\u3400-\u4dbf]/)) {
+      return prompt;
+    }
+
+    try {
+      const aiEndpoint = `/api/${aiModel}`;
+      const aiModelName = getApiModelName(selectedModelId);
+
+      const response = await fetch(aiEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: aiModelName,
+          messages: [
+            {
+              role: 'system',
+              content: `You are an expert at creating prompts for AI video generation (Image-to-Video). Translate the following video settings and motion instructions from Japanese to highly optimized English. Output ONLY the English prompt.
+Organize the output into clear categories using brackets, for example:
+[Motion] smooth walking, hair blowing in the wind
+[Camera] slow pan from left to right, medium shot
+[Lighting] cinematic lighting, golden hour
+[Subject] a person wearing a stylish jacket
+Output ONLY the formatted tags and prompt.`
+            },
+            {
+              role: 'user',
+              content: prompt
+            }
+          ],
+          max_tokens: 300
+        })
+      });
+
+      if (!response.ok) throw new Error('Translation API failed');
+      const data = await response.json();
+      return data.choices?.[0]?.message?.content?.trim() || data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || prompt;
+    } catch (e) {
+      console.error('Video prompt translation error:', e);
+      return prompt; // エラー時は元のプロンプトを返す
+    }
+  };
+
   // カット単体の動画を生成
   const generateVideoForCut = async (cutId: number) => {
     const targetCut = cuts.find(c => c.id === cutId);
@@ -1056,7 +1119,8 @@ JSON配列形式で出力してください。`
 
     try {
       // 動画プロンプトを生成
-      const videoPrompt = generateVideoPromptFromSettings(targetCut);
+      let videoPrompt = generateVideoPromptFromSettings(targetCut);
+      videoPrompt = await translateVideoPrompt(videoPrompt);
 
       // 動画プロンプトをカットに保存
       setCuts(prev => prev.map(c => c.id === cutId ? { ...c, videoPrompt } : c));
@@ -1120,7 +1184,8 @@ JSON配列形式で出力してください。`
     // 各カットの動画を順次生成（並列だとAPI制限に引っかかる可能性があるため）
     for (const cut of cutsWithImages) {
       try {
-        const videoPrompt = generateVideoPromptFromSettings(cut);
+        let videoPrompt = generateVideoPromptFromSettings(cut);
+        videoPrompt = await translateVideoPrompt(videoPrompt);
 
         // 尺を取得（デフォルト5秒）
         const durationMap: Record<string, '5' | '10'> = {
@@ -3948,6 +4013,24 @@ ${inputContext}
                             onChange={(e) => updateCutField(cut.id, 'prompt', e.target.value)}
                             className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded-lg px-3 py-2 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50 resize-y min-h-[60px]"
                           />
+                          <div className="flex justify-end mt-1.5">
+                            <button
+                              onClick={() => regenerateVideoPromptFromFields(cut.id)}
+                              disabled={regeneratingCutId === cut.id}
+                              className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold shadow-sm transition-all ${
+                                regeneratingCutId === cut.id
+                                  ? 'bg-purple-100 dark:bg-purple-500/20 text-purple-500 cursor-wait'
+                                  : 'bg-gradient-to-r from-purple-500/10 to-pink-500/10 hover:from-purple-500/20 hover:to-pink-500/20 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-500/30 hover:border-purple-300 dark:hover:border-purple-500/50'
+                              }`}
+                              title="現在の設定から動画用プロンプト（英語）を生成"
+                            >
+                              {regeneratingCutId === cut.id ? (
+                                <><Loader2 size={12} className="animate-spin" /> 動画プロンプト生成中...</>
+                              ) : (
+                                <><Video size={12} /> 動画プロンプトを生成する (英語)</>
+                              )}
+                            </button>
+                          </div>
                         </div>
 
                         {/* Image Generation Section inside Edit */}
