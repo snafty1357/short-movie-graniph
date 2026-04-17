@@ -503,11 +503,6 @@ const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
                             😊 {cut.expression}
                           </span>
                         )}
-                        {cut.productEmphasis && (
-                          <span className="px-1.5 py-0.5 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded text-amber-600 dark:text-amber-400">
-                            👕 {cut.productEmphasis}
-                          </span>
-                        )}
                         {cut.background && (
                           <span className="px-1.5 py-0.5 bg-green-50 dark:bg-green-500/10 border border-green-200 dark:border-green-500/20 rounded text-green-600 dark:text-green-400">
                             🏙️ {cut.background}

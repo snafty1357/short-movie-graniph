@@ -433,7 +433,6 @@ IP情報: ${cut.ipPrompt || 'なし'}
       cut.moveDistance && `移動距離: ${cut.moveDistance}`,
       cut.action && `アクション: ${cut.action}`,
       cut.background && `背景: ${cut.background}`,
-      cut.productEmphasis && `プロダクト強調: ${cut.productEmphasis}`,
       cut.camera && `カメラ: ${cut.camera}`,
     ].filter(Boolean).join('\n');
 
@@ -3232,68 +3231,6 @@ ${inputContext}
                     {isDownloadingVideos ? 'ダウンロード中...' : `動画DL (${cuts.filter(c => c.enabled && c.generatedVideoUrl).length})`}
                   </button>
 
-                  <div className="relative" ref={semanticPanelRef}>
-                    <button
-                      onClick={() => setSemanticPanelOpen(!semanticPanelOpen)}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[10px] font-bold transition-all shadow-sm ${
-                        semanticPanelOpen
-                          ? 'bg-blue-500/10 dark:bg-blue-500/20 border-blue-500/30 text-blue-600 dark:text-blue-300'
-                          : 'bg-white dark:bg-white/5 border-[#E0E0E0] dark:border-white/10 text-[#78909C] hover:text-[#333] dark:hover:text-white hover:bg-gray-50 dark:hover:bg-white/10'
-                      }`}
-                    >
-                      意味構造
-                      <ChevronDown size={10} className={`transition-transform duration-200 ${semanticPanelOpen ? 'rotate-180' : ''}`} />
-                    </button>
-                    {semanticPanelOpen && (
-                      <div className="absolute top-full right-0 mt-3 w-[400px] bg-white dark:bg-[#16161e] border border-[#E0E0E0] dark:border-white/10 rounded-2xl shadow-2xl dark:shadow-blue-500/5 p-5 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
-                        <div className="flex items-center gap-3 mb-4">
-                          <div className="w-1 h-5 rounded-full bg-gradient-to-b from-blue-400 to-indigo-500"></div>
-                          <h3 className="text-[#333333] dark:text-gray-200 font-semibold text-sm">意味構造</h3>
-                        </div>
-                        <div className="space-y-2 text-left">
-                          <p className="text-[10px] text-[#78909C] dark:text-gray-500 font-medium whitespace-normal">ショート動画全体の意味構造（プロット展開）を一つにまとめて定義します。</p>
-                          <textarea
-                            value={semanticPrompt}
-                            onChange={(e) => setSemanticPrompt(e.target.value)}
-                            placeholder="全体の意味構造を入力..."
-                            className="w-full h-40 bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg p-2.5 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-blue-500/50 transition-colors custom-scrollbar resize-y whitespace-pre-wrap leading-relaxed"
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  
-                  <div className="relative" ref={productPanelRef}>
-                    <button
-                      onClick={() => setProductPanelOpen(!productPanelOpen)}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[10px] font-bold transition-all shadow-sm ${
-                        productPanelOpen
-                          ? 'bg-amber-500/10 dark:bg-amber-500/20 border-amber-500/30 text-amber-600 dark:text-amber-300'
-                          : 'bg-white dark:bg-white/5 border-[#E0E0E0] dark:border-white/10 text-[#78909C] hover:text-[#333] dark:hover:text-white hover:bg-gray-50 dark:hover:bg-white/10'
-                      }`}
-                    >
-                      プロダクト強調
-                      <ChevronDown size={10} className={`transition-transform duration-200 ${productPanelOpen ? 'rotate-180' : ''}`} />
-                    </button>
-                    {productPanelOpen && (
-                      <div className="absolute top-full right-0 mt-3 w-[400px] bg-white dark:bg-[#16161e] border border-[#E0E0E0] dark:border-white/10 rounded-2xl shadow-2xl dark:shadow-amber-500/5 p-5 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
-                        <div className="flex items-center gap-3 mb-4">
-                          <div className="w-1 h-5 rounded-full bg-gradient-to-b from-amber-400 to-orange-500"></div>
-                          <h3 className="text-[#333333] dark:text-gray-200 font-semibold text-sm">プロダクト強調</h3>
-                        </div>
-                        <div className="space-y-2 text-left">
-                          <p className="text-[10px] text-[#78909C] dark:text-gray-500 font-medium whitespace-normal">衣装・商品へのフォーカスを強く高めるプロンプトを定義します。</p>
-                          <textarea
-                            value={productPrompt}
-                            onChange={(e) => setProductPrompt(e.target.value)}
-                            placeholder="例: extremely detailed garment texture, highly focused on the clothing item, clear product shot..."
-                            className="w-full h-32 bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg p-2.5 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-amber-500/50 transition-colors custom-scrollbar resize-y whitespace-pre-wrap leading-relaxed"
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
                   <div className="w-px h-6 bg-gray-200 dark:bg-white/10 mx-1"></div>
 
                   {/* キャラクター変更＆再生成ボタン */}
@@ -3796,17 +3733,6 @@ ${inputContext}
                                   className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50"
                                 />
                               </div>
-                              <div className="col-span-2">
-                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">プロダクト強調</label>
-                                <input
-                                  type="text"
-                                  value={cut.productEmphasis || ''}
-                                  onChange={(e) => updateCutField(cut.id, 'productEmphasis', e.target.value)}
-                                  placeholder="袖、ロゴ、素材感..."
-                                  className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50"
-                                />
-                              </div>
-                            </div>
                           </div>
                         )}
 
