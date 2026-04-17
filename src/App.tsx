@@ -15,7 +15,7 @@ const StoryboardWorkflowModal = lazy(() => import('./components/StoryboardWorkfl
 import { User, Users, Sun, Moon, UserCircle, RotateCcw, RefreshCw, Pencil, ChevronDown, Sparkles, Image as ImageIcon, Loader2, Upload, Play, BookOpen, History, Save, Trash2, FolderOpen, Maximize2, X, Plus, Search, Download, Camera, Aperture, Focus, Film, Video, Layers } from 'lucide-react';
 import { generatePose, fileToDataUrl, generateKlingVideo } from './services/falService';
 import { generateFixedElements, generateCutComposition, compositionRowToCutItem, DEFAULT_FIXED_META_PROMPT, DEFAULT_REGULATION, DEFAULT_META_PROMPT, type AiModelType } from './services/storyPdfService';
-import { getEnabledAiModels, getSelectedModelId, setSelectedModelId, getProviderFromModelId, type AiModelVersion } from './services/aiModelConfig';
+import { getEnabledAiModels, getSelectedModelId, setSelectedModelId, getProviderFromModelId, getApiModelName, type AiModelVersion } from './services/aiModelConfig';
 import { getProjectHistory, saveToProjectHistory, removeFromProjectHistory, generateProjectName, DEFAULT_BUDGET, type ProjectHistoryEntry, type ProjectBudget, type GenerationTimes } from './services/projectHistoryService';
 
 
@@ -358,7 +358,7 @@ const App: React.FC = () => {
     setRegeneratingCutId(cutId);
     try {
       const aiEndpoint = `/api/${aiModel}`;
-      const aiModelName = aiModel === 'openai' ? 'gpt-4o' : 'claude-sonnet-4-20250514';
+      const aiModelName = getApiModelName(selectedModelId);
 
       const response = await fetch(aiEndpoint, {
         method: 'POST',
@@ -445,7 +445,7 @@ IP情報: ${cut.ipPrompt || 'なし'}
     setRegeneratingCutId(cutId);
     try {
       const aiEndpoint = `/api/${aiModel}`;
-      const aiModelName = aiModel === 'openai' ? 'gpt-4o' : 'claude-sonnet-4-20250514';
+      const aiModelName = getApiModelName(selectedModelId);
 
       const response = await fetch(aiEndpoint, {
         method: 'POST',
@@ -540,7 +540,7 @@ Output ONLY the formatted prompt, no explanations.`
     try {
       // AIで背景プロンプトを生成
       const aiEndpoint = `/api/${aiModel}`;
-      const aiModelName = aiModel === 'openai' ? 'gpt-4o' : 'claude-sonnet-4-20250514';
+      const aiModelName = getApiModelName(selectedModelId);
 
       const promptResponse = await fetch(aiEndpoint, {
         method: 'POST',

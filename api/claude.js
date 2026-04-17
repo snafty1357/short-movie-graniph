@@ -4,9 +4,9 @@ export const config = {
 
 export default async function handler(req, res) {
   // CORS headers - 環境変数で許可オリジンを制限
-  const allowedOrigin = process.env.CORS_ALLOWED_ORIGIN || process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
-    : '*';
+  const allowedOrigin = process.env.CORS_ALLOWED_ORIGIN 
+    ? process.env.CORS_ALLOWED_ORIGIN 
+    : (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '*');
   res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key, anthropic-version');

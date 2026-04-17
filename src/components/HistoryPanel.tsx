@@ -22,7 +22,7 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({ isOpen, onClose, onSelectEn
   const loadHistory = useCallback(async () => {
     if (!user) return;
     setIsLoading(true);
-    const data = await getHistory(user.id);
+    const data = await getHistory();
     setEntries(data);
     setIsLoading(false);
   }, [user]);
@@ -48,7 +48,7 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({ isOpen, onClose, onSelectEn
       return;
     }
     if (!user) return;
-    await clearHistory(user.id);
+    await clearHistory();
     setEntries([]);
     setConfirmClear(false);
   }, [confirmClear, user]);

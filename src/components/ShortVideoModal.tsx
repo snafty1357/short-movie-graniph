@@ -143,6 +143,8 @@ const ShortVideoModal: React.FC<ShortVideoModalProps> = ({
       const humanDataUrl = await fileToDataUrl(humanFile);
       const newResults: ResultItem[] = [];
       const imageUrls: string[] = [];
+      
+      const { data: { user: authUser } } = await supabase.auth.getUser();
 
       for (let i = 0; i < activeCuts.length; i++) {
         const cut = activeCuts[i];
@@ -194,7 +196,7 @@ const ShortVideoModal: React.FC<ShortVideoModalProps> = ({
           newResults.push(newResult);
 
           supabase.from('generations').insert({
-            user_id: undefined, 
+            user_id: authUser?.id || null, 
             device_id: getDeviceId(),
             project_id: newResult.projectId,
             image_url: newResult.imageUrl,

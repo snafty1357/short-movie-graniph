@@ -48,9 +48,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!session) {
+        // セッションがない場合は匿名ログインを実行
+        const { data, error } = await supabase.auth.signInAnonymously();
+        if (error) {
+          console.error('[Auth] Anonymous sign-in failed:', error);
+        }
+        setSession(data?.session ?? null);
+        setUser(data?.user ?? null);
+      } else {
+        setSession(session);
+        setUser(session.user);
+      }
       setLoading(false);
     });
 

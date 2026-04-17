@@ -23,14 +23,15 @@ import { supabase } from './supabaseClient';
 /**
  * Supabaseから全履歴を取得
  */
-export async function getHistory(userId?: string): Promise<HistoryEntry[]> {
+export async function getHistory(): Promise<HistoryEntry[]> {
   try {
-    if (!userId) return [];
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return [];
     
     const { data, error } = await supabase
       .from('generations')
       .select('*')
-      .eq('user_id', userId)
+      .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(MAX_ENTRIES);
       
@@ -57,8 +58,6 @@ export async function getHistory(userId?: string): Promise<HistoryEntry[]> {
   }
 }
 
-
-
 /**
  * 特定の履歴を削除
  */
@@ -74,9 +73,11 @@ export async function removeFromHistory(id: string): Promise<void> {
 /**
  * 全履歴を削除
  */
-export async function clearHistory(userId: string): Promise<void> {
+export async function clearHistory(): Promise<void> {
   try {
-    const { error } = await supabase.from('generations').delete().eq('user_id', userId);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { error } = await supabase.from('generations').delete().eq('user_id', user.id);
     if (error) console.error('[History] Clear all error:', error);
   } catch (e) {
     console.error('[History] Failed to clear history:', e);

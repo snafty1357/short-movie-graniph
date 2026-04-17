@@ -45,7 +45,13 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({
                      e.dataTransfer.getData('text/plain');
     if (imageUrl && (imageUrl.startsWith('data:image') || imageUrl.startsWith('http'))) {
       try {
-        const response = await fetch(imageUrl);
+        let targetUrl = imageUrl;
+        if (imageUrl.startsWith('http') && !imageUrl.includes(window.location.host)) {
+          // CORSを回避するため自社プロキシを経由する
+          targetUrl = `/api/image-proxy?url=${encodeURIComponent(imageUrl)}`;
+        }
+        
+        const response = await fetch(targetUrl);
         const blob = await response.blob();
         const ext = blob.type.split('/')[1] || 'png';
         const imageFile = new File([blob], `dropped-result.${ext}`, { type: blob.type });

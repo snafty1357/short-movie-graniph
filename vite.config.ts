@@ -96,81 +96,6 @@ function aiProxyPlugin(env: Record<string, string>): Plugin {
   return {
     name: 'ai-proxy',
     configureServer(server) {
-      server.middlewares.use('/api/gemini', async (req, res) => {
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-        
-        if (req.method === 'OPTIONS') {
-          res.statusCode = 200;
-          res.end();
-          return;
-        }
-
-        const apiKey = env.GEMINI_API_KEY || env.VITE_GEMINI_API_KEY;
-        if (!apiKey) {
-           res.statusCode = 500;
-           res.end(JSON.stringify({ error: { message: 'GEMINI_API_KEY is not configured' } }));
-           return;
-        }
-
-        let body = '';
-        await new Promise<void>((resolve) => {
-          req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
-          req.on('end', () => resolve());
-        });
-
-        try {
-          const reqBody = JSON.parse(body);
-          const { messages, system_instruction } = reqBody;
-          
-          let systemText = "";
-          const contents = [];
-          for (const msg of messages) {
-            if (msg.role === 'system') {
-              systemText += msg.content + "\\n";
-            } else {
-              contents.push({ role: msg.role === 'user' ? 'user' : 'model', parts: [{ text: msg.content }] });
-            }
-          }
-          
-          const requestBody: any = {
-            contents,
-            generationConfig: {
-              temperature: reqBody.temperature || 0.7,
-              maxOutputTokens: reqBody.max_tokens || 4000
-            }
-          };
-          if (systemText || system_instruction) {
-            requestBody.systemInstruction = { parts: [{ text: system_instruction || systemText }] };
-          }
-
-          const modelName = reqBody.model || 'gemini-2.5-flash';
-          const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-
-          const response = await fetch(apiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(requestBody),
-          });
-
-          const data: any = await response.json();
-          if (!response.ok) {
-            res.statusCode = response.status;
-            res.end(JSON.stringify({ error: { message: data.error?.message || 'Gemini API Error' } }));
-            return;
-          }
-
-          const textOutput = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-          res.statusCode = 200;
-          res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({ choices: [{ message: { content: textOutput } }] }));
-        } catch (err: any) {
-          res.statusCode = 500;
-          res.end(JSON.stringify({ error: { message: err.message } }));
-        }
-      });
-
       server.middlewares.use('/api/claude', async (req, res) => {
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -267,33 +192,6 @@ export default defineConfig(({ mode }) => {
                 proxyReq.setHeader('Authorization', `Bearer ${apiKey}`);
               }
             });
-          }
-        },
-        '/api/gemini': {
-          target: 'https://generativelanguage.googleapis.com',
-          changeOrigin: true,
-          rewrite: (path) => {
-            const url = new URL(path, 'http://localhost');
-            const model = url.searchParams.get('model') || 'gemini-2.5-flash';
-            return `/v1beta/models/${model}:generateContent`;
-          },
-          secure: true,
-          configure: (proxy) => {
-            proxy.on('proxyReq', (proxyReq, _req) => {
-              const apiKey = env.GEMINI_API_KEY || env.VITE_GEMINI_API_KEY;
-              if (apiKey) {
-                proxyReq.path = proxyReq.path + `?key=${apiKey}`;
-              }
-            });
-            
-            // To make gemini behave like OpenAI format, we would need to proxyRes
-            // But since body transformation is hard in http-proxy, it's better to NOT use direct proxy 
-            // for Claude and Gemini, and instead fix local dev to use a simple express server or just 
-            // handle it in the frontend! 
-            // WAIT. If I handle mapping in the frontend, I DO NOT need proxy body modification! 
-            // I should handle text -> OpenAI format mapping in the FRONTEND or use Vercel Serverless!
-            // Actually, wait, does the frontend currently send standard OpenAI bodies? Yes.
-            // If I just route them via frontend directly without Vercel in local, then CORS applies!
           }
         }
       }
