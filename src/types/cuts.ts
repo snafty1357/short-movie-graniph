@@ -17,6 +17,7 @@ export interface CutItem {
   isGenerating?: boolean;
   errorMessage?: string;
   backgroundImageUrl?: string; // シーン背景画像
+  backgroundPrompt?: string;   // 手動・AI連携の背景用プロンプト
   isGeneratingBackground?: boolean;
   // 動画生成
   generatedVideoUrl?: string;  // 生成された動画URL

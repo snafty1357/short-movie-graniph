@@ -203,9 +203,11 @@ const App: React.FC = () => {
   const [stillImageStyle, setStillImageStyle] = useState('masterpiece, 8k resolution, highly detailed, photorealistic, cinematic lighting');
   const [stillImageNegative, setStillImageNegative] = useState('');
   const [stillImageMetaPrompt, setStillImageMetaPrompt] = useState('動画の全体的な品質やルック＆フィールを定義するスタイリングプロンプトを指定してください。');
-  const [semanticPrompt, setSemanticPrompt] = useState('1 状況把握\n2 重さ提示\n3 重さの深化\n4 ズレ発生\n5 軽さ提示\n6 解放\n7 余韻');
-  const [productPrompt, setProductPrompt] = useState('');
+  const [semanticPrompt, _setSemanticPrompt] = useState('1 状況把握\n2 重さ提示\n3 重さの深化\n4 ズレ発生\n5 軽さ提示\n6 解放\n7 余韻');
+  const [productPrompt, _setProductPrompt] = useState('');
   const [stagePrompt, setStagePrompt] = useState<string>(''); // used for fixed elements now
+  const [globalBackgroundImageUrl, setGlobalBackgroundImageUrl] = useState<string | null>(null);
+  const [isGeneratingGlobalBackground, setIsGeneratingGlobalBackground] = useState(false);
   const [extractedPdfText, setExtractedPdfText] = useState('');
   const [fixedElementMetaPrompt, setFixedElementMetaPrompt] = useState(DEFAULT_FIXED_META_PROMPT);
   const [isGeneratingFixed, setIsGeneratingFixed] = useState(false);
@@ -339,7 +341,7 @@ const App: React.FC = () => {
 
 
 
-  const updateCutField = (id: number, field: 'title' | 'prompt' | 'camera' | 'semanticPrompt' | 'expression' | 'gaze' | 'pose' | 'walkingStyle' | 'walkPosition' | 'moveDistance' | 'action' | 'background' | 'productEmphasis' | 'duration' | 'motionType' | 'cameraMovement' | 'transition' | 'videoPrompt' | 'motionIntensity' | 'startFrame' | 'endFrame', value: string) => {
+  const updateCutField = (id: number, field: 'title' | 'prompt' | 'camera' | 'semanticPrompt' | 'expression' | 'gaze' | 'pose' | 'walkingStyle' | 'walkPosition' | 'moveDistance' | 'action' | 'background' | 'backgroundPrompt' | 'productEmphasis' | 'duration' | 'motionType' | 'cameraMovement' | 'transition' | 'videoPrompt' | 'motionIntensity' | 'startFrame' | 'endFrame', value: string) => {
     setCuts(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c));
   };
 
@@ -492,10 +494,10 @@ Output ONLY the formatted prompt, no explanations.`
     } catch (err) {
       console.error('Field translation error:', err);
       alert('英語化に失敗しました: ' + (err instanceof Error ? err.message : '不明なエラー'));
-    } finally {
       setRegeneratingCutId(null);
     }
   };
+
 
   // 詳細フィールドから動画用英語プロンプトを生成
   const regenerateVideoPromptFromFields = async (cutId: number) => {
@@ -547,18 +549,85 @@ Output ONLY the formatted prompt, no explanations.`
     }
   };
 
-  // シーン背景画像の生成
-  const generateBackgroundForCut = async (cutId: number) => {
-    const cut = cuts.find(c => c.id === cutId);
-    if (!cut || !stagePrompt) return;
-
-    setCuts(prev => prev.map(c => c.id === cutId ? { ...c, isGeneratingBackground: true } : c));
-
+  // 1. 全体背景プロンプトの翻訳と画像生成
+  const generateGlobalBackgroundImage = async () => {
+    if (!stagePrompt) return;
+    setIsGeneratingGlobalBackground(true);
     try {
-      // AIで背景プロンプトを生成
+      // AIでstagePromptを英語プロンプトに変換 (必要なら)
       const aiEndpoint = `/api/${aiModel}`;
       const aiModelName = getApiModelName(selectedModelId);
+      const promptResponse = await fetch(aiEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: aiModelName,
+          messages: [
+            {
+              role: 'system',
+              content: `You are an expert at creating background image prompts for AI image generation. Translate the following Japanese scene description into a detailed English prompt for an overarching background scene WITHOUT any people or characters.`
+            },
+            {
+              role: 'user',
+              content: stagePrompt
+            }
+          ],
+          max_tokens: 300
+        })
+      });
+      let bgPrompt = stagePrompt;
+      if (promptResponse.ok) {
+        const promptData = await promptResponse.json();
+        bgPrompt = promptData.choices?.[0]?.message?.content || promptData.candidates?.[0]?.content?.parts?.[0]?.text || stagePrompt;
+      }
+      
+      const finalPrompt = `${bgPrompt}, ${cameraType}, lens ${lensType}, ${colorGrade} color grading, ${depthOfField} depth of field, no people, empty scene, high quality background, 8k resolution`;
+      const falParams = new URLSearchParams({ path: 'fal-ai/flux/dev' });
+      const falResponse = await fetch(`/api/proxy?${falParams.toString()}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: finalPrompt,
+          image_size: 'landscape_16_9',
+          num_images: 1,
+          enable_safety_checker: false
+        })
+      });
+      if (!falResponse.ok) throw new Error('Global background generation failed');
+      let falData = await falResponse.json();
+      
+      if (falData.status_url && falData.response_url) {
+        for (let i = 0; i < 60; i++) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          const statusRes = await fetch(`/api/proxy?url=${encodeURIComponent(falData.status_url)}`);
+          const statusData = await statusRes.json();
+          if (statusData.status === 'COMPLETED') {
+            const resultRes = await fetch(`/api/proxy?url=${encodeURIComponent(falData.response_url)}`);
+            falData = await resultRes.json();
+            break;
+          }
+          if (statusData.status === 'FAILED') throw new Error('Global background generation failed');
+        }
+      }
+      const imageUrl = falData.images?.[0]?.url || falData.output?.images?.[0]?.url || falData.image?.url || (typeof falData.images?.[0] === 'string' ? falData.images[0] : null);
+      if (imageUrl) setGlobalBackgroundImageUrl(imageUrl);
+      else throw new Error('No image URL returned');
+    } catch (err) {
+      console.error(err);
+      alert('全体背景の生成に失敗しました');
+    } finally {
+      setIsGeneratingGlobalBackground(false);
+    }
+  };
 
+  // 2. シーン別の背景プロンプトを生成
+  const generateBackgroundPromptForCut = async (cutId: number) => {
+    const cut = cuts.find(c => c.id === cutId);
+    if (!cut) return;
+    setCuts(prev => prev.map(c => c.id === cutId ? { ...c, isGeneratingBackground: true } : c));
+    try {
+      const aiEndpoint = `/api/${aiModel}`;
+      const aiModelName = getApiModelName(selectedModelId);
       const promptResponse = await fetch(aiEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -571,24 +640,33 @@ Output ONLY the formatted prompt, no explanations.`
             },
             {
               role: 'user',
-              content: `シーン: ${cut.title}
-カメラ: ${cut.camera || 'ミディアムショット'}
-背景設定: ${stagePrompt}
-シーンプロンプト: ${cut.prompt}
-
-このシーンの背景のみ（人物なし）を生成するプロンプトを英語で出力してください。建物、風景、インテリアなど背景要素のみを詳細に記述してください。Output ONLY the English prompt.`
+              content: `シーン: ${cut.title}\nカメラ: ${cut.camera || 'ミディアムショット'}\n背景設定: ${stagePrompt}\nシーンプロンプト: ${cut.prompt}\n\nこのシーンの背景のみ（人物なし）を推測して専用のプロンプトを英語で出力してください。Output ONLY the English prompt.`
             }
           ],
           max_tokens: 300
         })
       });
-
       if (!promptResponse.ok) throw new Error('AI prompt generation failed');
       const promptData = await promptResponse.json();
       const bgPrompt = promptData.choices?.[0]?.message?.content || promptData.candidates?.[0]?.content?.parts?.[0]?.text || stagePrompt;
 
-      // fal.aiで背景画像を生成（プロキシ経由）
-      const finalPrompt = `${bgPrompt}, no people, no characters, empty scene, high quality background, cinematic lighting, 8k resolution`;
+      setCuts(prev => prev.map(c => c.id === cutId ? { ...c, backgroundPrompt: bgPrompt, isGeneratingBackground: false } : c));
+    } catch (err) {
+      console.error(err);
+      setCuts(prev => prev.map(c => c.id === cutId ? { ...c, isGeneratingBackground: false } : c));
+      alert('プロンプトの生成に失敗しました');
+    }
+  };
+
+  // 3. シーン別の背景画像をプロンプトから生成
+  const generateBackgroundImageForCut = async (cutId: number) => {
+    const cut = cuts.find(c => c.id === cutId);
+    const promptToUse = cut?.backgroundPrompt?.trim() || stagePrompt;
+    if (!cut || !promptToUse) return;
+    
+    setCuts(prev => prev.map(c => c.id === cutId ? { ...c, isGeneratingBackground: true } : c));
+    try {
+      const finalPrompt = `${promptToUse}, ${cameraType}, lens ${lensType}, ${colorGrade} color grading, ${depthOfField} depth of field, no people, empty scene, high quality background, 8k resolution`;
       const falParams = new URLSearchParams({ path: 'fal-ai/flux/dev' });
       const falResponse = await fetch(`/api/proxy?${falParams.toString()}`, {
         method: 'POST',
@@ -600,54 +678,32 @@ Output ONLY the formatted prompt, no explanations.`
           enable_safety_checker: false
         })
       });
-
-      if (!falResponse.ok) {
-        const errData = await falResponse.json().catch(() => ({}));
-        throw new Error(errData.detail || errData.error || 'Background image generation failed');
-      }
+      if (!falResponse.ok) throw new Error('Background image generation failed');
       let falData = await falResponse.json();
-      console.log('[Background] Initial response:', JSON.stringify(falData).substring(0, 500));
-
-      // 非同期処理の場合はポーリング
+      
       if (falData.status_url && falData.response_url) {
-        const maxAttempts = 60;
-        for (let i = 0; i < maxAttempts; i++) {
+        for (let i = 0; i < 60; i++) {
           await new Promise(resolve => setTimeout(resolve, 2000));
-          const statusParams = new URLSearchParams({ url: falData.status_url });
-          const statusRes = await fetch(`/api/proxy?${statusParams.toString()}`);
+          const statusRes = await fetch(`/api/proxy?url=${encodeURIComponent(falData.status_url)}`);
           const statusData = await statusRes.json();
-          console.log(`[Background] Poll ${i + 1}: ${statusData.status}`);
-
           if (statusData.status === 'COMPLETED') {
-            const responseParams = new URLSearchParams({ url: falData.response_url });
-            const resultRes = await fetch(`/api/proxy?${responseParams.toString()}`);
+            const resultRes = await fetch(`/api/proxy?url=${encodeURIComponent(falData.response_url)}`);
             falData = await resultRes.json();
             break;
           }
-          if (statusData.status === 'FAILED') {
-            throw new Error('Background generation failed');
-          }
+          if (statusData.status === 'FAILED') throw new Error('Background generation failed');
         }
       }
-
-      // 様々なレスポンス形式に対応
-      const imageUrl = falData.images?.[0]?.url
-        || falData.output?.images?.[0]?.url
-        || falData.image?.url
-        || (typeof falData.images?.[0] === 'string' ? falData.images[0] : null);
-
-      console.log('[Background] Final imageUrl:', imageUrl);
-
+      const imageUrl = falData.images?.[0]?.url || falData.output?.images?.[0]?.url || falData.image?.url || (typeof falData.images?.[0] === 'string' ? falData.images[0] : null);
       if (imageUrl) {
         setCuts(prev => prev.map(c => c.id === cutId ? { ...c, backgroundImageUrl: imageUrl, isGeneratingBackground: false } : c));
       } else {
-        console.error('[Background] Full response:', JSON.stringify(falData));
         throw new Error('No image URL returned');
       }
     } catch (err) {
-      console.error('Background generation error:', err);
+      console.error(err);
       setCuts(prev => prev.map(c => c.id === cutId ? { ...c, isGeneratingBackground: false } : c));
-      alert('背景画像の生成に失敗しました: ' + (err instanceof Error ? err.message : '不明なエラー'));
+      alert('背景画像の生成に失敗しました');
     }
   };
 
@@ -655,7 +711,7 @@ Output ONLY the formatted prompt, no explanations.`
   const generateAllBackgrounds = async () => {
     const enabledCutsForBg = cuts.filter(c => c.enabled);
     for (const cut of enabledCutsForBg) {
-      await generateBackgroundForCut(cut.id);
+      await generateBackgroundImageForCut(cut.id);
     }
   };
 
@@ -947,7 +1003,14 @@ JSON配列形式で出力してください。`
       }
 
       // スタイルと背景を追加
-      const combinedBase = [stillImageStyle, stagePrompt].filter(Boolean).join(', ');
+      const cameraSettings = [
+        cameraType !== 'none' ? `shot on ${cameraType}` : '',
+        lensType !== 'none' ? `${lensType} lens` : '',
+        depthOfField !== 'none' ? `${depthOfField} depth of field` : '',
+        colorGrade !== 'none' ? `${colorGrade} color grading` : ''
+      ].filter(Boolean).join(', ');
+      
+      const combinedBase = [stillImageStyle, stagePrompt, cameraSettings].filter(Boolean).join(', ');
       if (combinedBase) {
         positivePrompt = `${combinedBase}, ${positivePrompt}`;
       }
@@ -1053,6 +1116,18 @@ JSON配列形式で出力してください。`
     } else {
       // デフォルトスタイル
       parts.push('Cinematic fashion video, smooth motion, professional lighting');
+    }
+
+    // カメラ・カラグレ設定（全体設定）
+    const cameraSettings = [
+      cameraType !== 'none' ? `shot on ${cameraType}` : '',
+      lensType !== 'none' ? `${lensType} lens` : '',
+      depthOfField !== 'none' ? `${depthOfField} depth of field` : '',
+      colorGrade !== 'none' ? `${colorGrade} color grading` : ''
+    ].filter(Boolean).join(', ');
+    
+    if (cameraSettings) {
+      parts.push(cameraSettings);
     }
 
     return parts.join('. ');
@@ -1248,7 +1323,13 @@ Output ONLY the formatted tags and prompt.`
     try {
       const humanDataUrl = await fileToDataUrl(humanFile);
       const subCharDataUrl = subCharFile ? await fileToDataUrl(subCharFile) : null;
-      const combinedBase = [stillImageStyle, stagePrompt].filter(Boolean).join(', ');
+      const cameraSettings = [
+        cameraType !== 'none' ? `shot on ${cameraType}` : '',
+        lensType !== 'none' ? `${lensType} lens` : '',
+        depthOfField !== 'none' ? `${depthOfField} depth of field` : '',
+        colorGrade !== 'none' ? `${colorGrade} color grading` : ''
+      ].filter(Boolean).join(', ');
+      const combinedBase = [stillImageStyle, stagePrompt, cameraSettings].filter(Boolean).join(', ');
       const mainDetailPrompt = getMainCharDetailPrompt();
       const subDetailPrompt = getSubCharDetailPrompt();
 
@@ -3540,7 +3621,7 @@ ${inputContext}
                                 />
                               </label>
                               <button
-                                onClick={() => generateBackgroundForCut(cut.id)}
+                                onClick={() => generateBackgroundImageForCut(cut.id)}
                                 className="text-white hover:text-emerald-400 p-1 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
                                 title="背景を再生成"
                               >
@@ -4154,115 +4235,229 @@ ${inputContext}
                     className="w-full h-16 bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg p-2.5 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-emerald-500/50 transition-colors custom-scrollbar resize-y"
                   />
 
-                  {/* シーンごとの背景画像 */}
+                  {/* 背景画像の生成と管理 */}
                   {cuts.length > 0 && stagePrompt && (
                     <div className="mt-4 pt-4 border-t border-gray-200 dark:border-white/10">
-                      <div className="flex items-center justify-between mb-3">
-                        <h3 className="text-[10px] font-bold text-[#555] dark:text-gray-400 uppercase tracking-wider">
-                          シーン別背景画像
-                        </h3>
-                        <div className="flex items-center gap-2">
-                          {cuts.filter(c => c.enabled && c.backgroundImageUrl).length > 0 && (
-                            <button
-                              onClick={downloadAllBackgrounds}
-                              className="flex items-center gap-1 px-2 py-1 rounded text-[9px] font-bold transition-all bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400"
-                            >
-                              <Download size={10} />
-                              全てDL
-                            </button>
-                          )}
+                      <div className="flex items-center gap-2 mb-4">
+                        <div className="w-1 h-3 rounded-full bg-emerald-500"></div>
+                        <h3 className="text-xs font-bold text-[#333] dark:text-gray-200 uppercase">背景画像の生成と管理</h3>
+                      </div>
+
+                      {/* 全体背景 */}
+                      <div className="mb-6 bg-emerald-50 dark:bg-emerald-500/5 border border-emerald-100 dark:border-emerald-500/20 rounded-xl p-4">
+                        <div className="flex items-center justify-between mb-3">
+                          <h4 className="text-[11px] font-bold text-emerald-800 dark:text-emerald-400">0. 全体背景画像（マスター）</h4>
                           <button
-                            onClick={generateAllBackgrounds}
-                            disabled={cuts.some(c => c.isGeneratingBackground)}
-                            className={`flex items-center gap-1 px-2 py-1 rounded text-[9px] font-bold transition-all ${
-                              cuts.some(c => c.isGeneratingBackground)
-                                ? 'bg-gray-100 dark:bg-white/5 text-gray-400 cursor-wait'
-                                : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
-                            }`}
+                            onClick={generateGlobalBackgroundImage}
+                            disabled={isGeneratingGlobalBackground}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-[10px] font-bold transition-all shadow-sm"
                           >
-                            <Sparkles size={10} />
-                            全シーン一括生成
+                            {isGeneratingGlobalBackground ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                            全体画像を生成
                           </button>
                         </div>
+                        <div className="aspect-video w-full max-w-sm mx-auto rounded-lg overflow-hidden border border-emerald-200 dark:border-emerald-500/30 bg-emerald-100/50 dark:bg-emerald-900/20 relative">
+                          {globalBackgroundImageUrl ? (
+                            <img src={globalBackgroundImageUrl} alt="全体背景" className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex flex-col items-center justify-center text-emerald-600/50 dark:text-emerald-400/50">
+                              <ImageIcon size={24} className="mb-2" />
+                              <span className="text-[10px]">未生成</span>
+                            </div>
+                          )}
+                          {isGeneratingGlobalBackground && (
+                            <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center text-white">
+                              <Loader2 size={24} className="animate-spin mb-2" />
+                              <span className="text-xs font-bold">生成中...</span>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                      <div className="grid grid-cols-4 gap-2">
+
+                      {/* 各シーンの背景 */}
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-[11px] font-bold text-[#555] dark:text-gray-300">各シーンの背景設定</h4>
+                          <div className="flex gap-2">
+                             {cuts.filter(c => c.enabled && c.backgroundImageUrl).length > 0 && (
+                                <button
+                                  onClick={downloadAllBackgrounds}
+                                  className="flex items-center gap-1 px-2 py-1 rounded text-[9px] font-bold transition-all bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400"
+                                >
+                                  <Download size={10} />
+                                  全てDL
+                                </button>
+                              )}
+                            <button
+                              onClick={generateAllBackgrounds}
+                              disabled={cuts.some(c => c.isGeneratingBackground)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#EEE] hover:bg-[#E0E0E0] dark:bg-white/10 dark:hover:bg-white/20 text-[#333] dark:text-gray-200 rounded-lg text-[10px] font-bold transition-all"
+                            >
+                              <Sparkles size={10} />
+                              全シーン一括生成
+                            </button>
+                          </div>
+                        </div>
                         {cuts.filter(c => c.enabled).map((cut, index) => (
-                          <div key={cut.id} className="relative group">
-                            <div className="aspect-video rounded-lg overflow-hidden border border-gray-200 dark:border-white/10 bg-gray-100 dark:bg-white/5">
-                              {cut.backgroundImageUrl ? (
-                                <img
-                                  src={cut.backgroundImageUrl}
-                                  alt={`背景 ${index + 1}`}
-                                  className="w-full h-full object-cover"
-                                />
-                              ) : (
-                                <div className="w-full h-full flex items-center justify-center">
-                                  <ImageIcon size={16} className="text-gray-300 dark:text-gray-600" />
-                                </div>
-                              )}
-                              {cut.isGeneratingBackground && (
-                                <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                                  <Loader2 size={16} className="text-white animate-spin" />
-                                </div>
-                              )}
-                              {/* Hover overlay */}
-                              {!cut.isGeneratingBackground && (
-                                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
-                                  {cut.backgroundImageUrl && (
-                                    <>
-                                      <button
-                                        onClick={() => setLightboxImage({ url: cut.backgroundImageUrl!, title: `${cut.title} - 背景` })}
-                                        className="p-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white transition-colors"
-                                        title="拡大表示"
-                                      >
+                          <div key={cut.id} className="flex gap-4 p-3 bg-gray-50 dark:bg-[#1a1a24] border border-gray-200 dark:border-white/5 rounded-xl">
+                            <div className="w-48 shrink-0">
+                              <div className="aspect-video rounded-lg overflow-hidden border border-gray-200 dark:border-white/10 bg-gray-100 dark:bg-black/20 relative group">
+                                {cut.backgroundImageUrl ? (
+                                  <img src={cut.backgroundImageUrl} alt={`背景 ${index + 1}`} className="w-full h-full object-cover" />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center"><ImageIcon size={16} className="text-gray-300 dark:text-gray-600" /></div>
+                                )}
+                                {cut.isGeneratingBackground && (
+                                  <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center text-white">
+                                    <Loader2 size={16} className="animate-spin" />
+                                  </div>
+                                )}
+                                {!cut.isGeneratingBackground && cut.backgroundImageUrl && (
+                                   <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
+                                      <button onClick={() => setLightboxImage({ url: cut.backgroundImageUrl!, title: `${cut.title} - 背景` })} className="p-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white transition-colors" title="拡大表示">
                                         <Maximize2 size={12} />
                                       </button>
-                                      <button
-                                        onClick={() => downloadBackgroundImage(cut.backgroundImageUrl!, cut.title)}
-                                        className="p-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white transition-colors"
-                                        title="ダウンロード"
-                                      >
+                                      <button onClick={() => downloadBackgroundImage(cut.backgroundImageUrl!, cut.title)} className="p-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white transition-colors" title="ダウンロード">
                                         <Download size={12} />
                                       </button>
-                                    </>
-                                  )}
-                                  <label
-                                    className="p-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white transition-colors cursor-pointer"
-                                    title="画像をアップロード"
-                                  >
-                                    <Upload size={12} />
-                                    <input
-                                      type="file"
-                                      accept="image/*"
-                                      className="hidden"
-                                      onChange={(e) => {
-                                        const file = e.target.files?.[0];
-                                        if (file) {
-                                          const url = URL.createObjectURL(file);
-                                          setCuts(prev => prev.map(c => c.id === cut.id ? { ...c, backgroundImageUrl: url } : c));
-                                        }
-                                        e.target.value = '';
-                                      }}
-                                    />
-                                  </label>
-                                  <button
-                                    onClick={() => generateBackgroundForCut(cut.id)}
-                                    className="p-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white transition-colors"
-                                    title="背景を再生成"
-                                  >
-                                    <RefreshCw size={12} />
-                                  </button>
-                                </div>
-                              )}
+                                      <label className="p-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white transition-colors cursor-pointer" title="画像をアップロード">
+                                        <Upload size={12} />
+                                        <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                                          const file = e.target.files?.[0];
+                                          if (file) {
+                                            const url = URL.createObjectURL(file);
+                                            setCuts(prev => prev.map(c => c.id === cut.id ? { ...c, backgroundImageUrl: url } : c));
+                                          }
+                                        }} />
+                                      </label>
+                                   </div>
+                                )}
+                              </div>
+                              <p className="text-[9px] font-bold text-center text-[#78909C] dark:text-gray-400 mt-2 truncate">シーン {index + 1}: {cut.title}</p>
                             </div>
-                            <p className="text-[8px] text-center text-[#78909C] dark:text-gray-500 mt-1 truncate">
-                              {index + 1}. {cut.title}
-                            </p>
+                            <div className="flex-1 flex flex-col gap-2">
+                              <div className="flex justify-between items-center">
+                                <label className="text-[9px] font-semibold text-[#78909C] dark:text-gray-400 uppercase">プロンプト (日本語/英語可)</label>
+                                <button
+                                  onClick={() => generateBackgroundPromptForCut(cut.id)}
+                                  className="text-[9px] text-blue-500 hover:text-blue-600 underline flex items-center gap-1 font-bold"
+                                >
+                                  <Sparkles size={8} /> AIでプロンプト生成
+                                </button>
+                              </div>
+                              <textarea
+                                value={cut.backgroundPrompt || ''}
+                                onChange={(e) => updateCutField(cut.id, 'backgroundPrompt', e.target.value)}
+                                placeholder="必要に応じてこのシーン専用の背景プロンプトを入力..."
+                                className="w-full h-16 bg-white dark:bg-black/20 border border-gray-200 dark:border-white/10 rounded-lg p-2 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50 resize-y"
+                              />
+                              <div className="flex justify-end gap-2 mt-auto">
+                                <button
+                                  onClick={() => generateBackgroundImageForCut(cut.id)}
+                                  disabled={cut.isGeneratingBackground || (!cut.backgroundPrompt && !stagePrompt)}
+                                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all shadow-sm ${
+                                    cut.isGeneratingBackground || (!cut.backgroundPrompt && !stagePrompt)
+                                      ? 'bg-gray-100 dark:bg-white/5 text-gray-400 cursor-not-allowed'
+                                      : 'bg-gradient-to-r from-emerald-400 to-emerald-600 text-white hover:from-emerald-500 hover:to-emerald-700 shadow-emerald-500/20'
+                                  }`}
+                                >
+                                  {cut.isGeneratingBackground ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />}
+                                  画像(再)生成
+                                </button>
+                              </div>
+                            </div>
                           </div>
                         ))}
                       </div>
                     </div>
                   )}
+                </div>
+
+                {/* Camera Settings / 撮影設定 (構成表) */}
+                <div className="glass rounded-2xl p-4 card-hover mb-4">
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="w-1 h-3 rounded-full bg-cyan-400"></div>
+                    <h3 className="text-xs font-bold text-[#333] dark:text-gray-200 uppercase tracking-wider flex items-center gap-1">
+                      <Camera size={12} /> カメラ・カラグレ設定（全体）
+                    </h3>
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {/* カメラタイプ */}
+                    <div>
+                      <label className="text-[10px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">
+                        カメラタイプ
+                      </label>
+                      <select
+                        value={cameraType}
+                        onChange={(e) => setCameraType(e.target.value)}
+                        className="w-full bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg px-2.5 py-2 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50"
+                      >
+                        <option value="none">指定なし</option>
+                        <option value="cinematic">シネマティック</option>
+                        <option value="documentary">ドキュメンタリー</option>
+                        <option value="fashion">ファッション</option>
+                        <option value="portrait">ポートレート</option>
+                        <option value="commercial">コマーシャル</option>
+                      </select>
+                    </div>
+
+                    {/* レンズ */}
+                    <div>
+                      <label className="text-[10px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">
+                        レンズ
+                      </label>
+                      <select
+                        value={lensType}
+                        onChange={(e) => setLensType(e.target.value)}
+                        className="w-full bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg px-2.5 py-2 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50"
+                      >
+                        <option value="none">指定なし</option>
+                        <option value="24mm">24mm (広角)</option>
+                        <option value="35mm">35mm (標準広角)</option>
+                        <option value="50mm">50mm (標準)</option>
+                        <option value="85mm">85mm (中望遠)</option>
+                        <option value="200mm">200mm (望遠)</option>
+                      </select>
+                    </div>
+
+                    {/* カラグレ */}
+                    <div>
+                      <label className="text-[10px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">
+                        カラーグレーディング
+                      </label>
+                      <select
+                        value={colorGrade}
+                        onChange={(e) => setColorGrade(e.target.value)}
+                        className="w-full bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg px-2.5 py-2 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50"
+                      >
+                        <option value="none">指定なし</option>
+                        <option value="natural">ナチュラル</option>
+                        <option value="warm">ウォーム（暖色系）</option>
+                        <option value="cool">クール（寒色系）</option>
+                        <option value="high-contrast">ハイコントラスト</option>
+                        <option value="vintage">ヴィンテージ</option>
+                        <option value="cinematic">シネマティック</option>
+                      </select>
+                    </div>
+                    
+                    {/* 被写界深度 */}
+                    <div>
+                      <label className="text-[10px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">
+                        被写界深度
+                      </label>
+                      <select
+                        value={depthOfField}
+                        onChange={(e) => setDepthOfField(e.target.value)}
+                        className="w-full bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg px-2.5 py-2 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50"
+                      >
+                        <option value="none">指定なし</option>
+                        <option value="deep">全体にピント (Pan focus)</option>
+                        <option value="medium">標準</option>
+                        <option value="shallow">背景ボケ (Shallow)</option>
+                      </select>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Generation Settings (Video/Still Toggle) */}
