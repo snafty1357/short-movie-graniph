@@ -26,6 +26,7 @@ export interface CutItem {
   expression?: string;        // 表情
   gaze?: string;              // 視線
   pose?: string;              // ポーズ
+  lighting?: string;          // ライティング
   walkingStyle?: string;      // 歩き方
   walkPosition?: string;      // 歩行位置（画面内）
   moveDistance?: string;      // 移動距離
@@ -39,8 +40,16 @@ export interface CutItem {
   transition?: string;        // トランジション 例: "カット", "フェード", "ディゾルブ"
   videoPrompt?: string;       // 動画生成用プロンプト
   motionIntensity?: string;   // 動きの強度 例: "弱", "中", "強"
-  startFrame?: string;        // 開始フレームの状態
-  endFrame?: string;          // 終了フレームの状態
+  startFrame?: string;        // 開始フレームの状態（メインキャラ）
+  endFrame?: string;          // 終了フレームの状態（メインキャラ）
+  // キャラクター関係・動き（動画用）
+  mainCharPosition?: string;    // メインキャラの位置（画面内）
+  ipPosition?: string;          // IPの位置（画面内）
+  mainIpRelation?: string;      // メインキャラとIPの関係（隣り合い、対面、前後など）
+  ipStartFrame?: string;        // IPの開始フレームの状態
+  ipEndFrame?: string;          // IPの終了フレームの状態
+  mainCharExpression?: string;  // メインキャラの表情
+  ipExpression?: string;        // IPの表情
 }
 
 export const DEFAULT_CUTS: CutItem[] = [

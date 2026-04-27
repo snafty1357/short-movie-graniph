@@ -307,11 +307,11 @@ export async function generatePose(request: PoseGenerationRequest): Promise<TryO
   positivePrompt = positivePrompt.replace(/\n+/g, ' ').trim();
   negativePrompt = negativePrompt.replace(/\n+/g, ' ').trim();
 
-  // プロンプトを構築（人物のアイデンティティ保持指示を追加）
-  let prompt = `${positivePrompt}. Strictly preserve the person's face identity, features, and their current clothing exactly as shown in the reference image.`;
+  // プロンプトを構築（人物のアイデンティティ保持指示を追加 - 髪型も含む）
+  let prompt = `${positivePrompt}. CRITICAL: Strictly preserve the person's face identity, facial features, hairstyle, hair color, hair length, and their current clothing exactly as shown in the reference image. The hairstyle must remain EXACTLY the same - do not change bangs, hair length, hair texture, or hair color.`;
 
   if (request.subCharacterImageUrl && request.subCharacterPrompt) {
-    prompt += ` Also include a companion character in the scene: ${request.subCharacterPrompt}. Place the companion character naturally within the composition.`;
+    prompt += ` Also include a second character (companion/IP character) from the second reference image in the scene: ${request.subCharacterPrompt}. The companion character must appear clearly and prominently in the composition alongside the main character.`;
   }
 
   console.log('[PoseGen] Positive prompt:', prompt.substring(0, 200) + '...');

@@ -6,7 +6,7 @@ import {
 import { extractTextFromPdf, generateCutComposition, compositionRowToCutItem, DEFAULT_REGULATION, DEFAULT_META_PROMPT, type AiModelType } from '../services/storyPdfService';
 import { generatePose, fileToDataUrl, generateKlingVideo, type KlingModel } from '../services/falService';
 import { downloadVideoFromUrl } from '../services/videoExportService';
-import type { CutItem } from './ShortVideoModal';
+import type { CutItem } from '../types/cuts';
 
 interface StoryboardWorkflowModalProps {
   isOpen: boolean;

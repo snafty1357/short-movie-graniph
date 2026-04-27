@@ -9,7 +9,7 @@ import {
   type CutCompositionRow,
   type AiModelType
 } from '../services/storyPdfService';
-import type { CutItem } from './ShortVideoModal';
+import type { CutItem } from '../types/cuts';
 
 interface StoryPdfUploaderProps {
   onCutsGenerated: (cuts: CutItem[]) => void;
@@ -32,10 +32,11 @@ const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
   onAiModelChange,
   selectedModelId,
   characterFile,
-  characterConfirmed,
+  characterConfirmed: _characterConfirmed,
   onRequestCharacter,
   onFullAutoGenerate,
 }) => {
+  void _characterConfirmed; // 将来使用予定
   // ─── State ───
   const [step, setStep] = useState<Step>('idle');
   const [showCharacterPopup, setShowCharacterPopup] = useState(false);
@@ -67,10 +68,10 @@ const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
     if (savedCount) setCutCount(Number(savedCount));
   }, []);
 
-  // キャラクター設定が完了したら自動で生成開始
+  // キャラクター画像が設定されたら自動で生成開始
   useEffect(() => {
     const runAutoGenerate = async () => {
-      if (characterFile && characterConfirmed && pendingText) {
+      if (characterFile && pendingText) {
         setShowCharacterPopup(false);
         if (onFullAutoGenerate) {
           setStep('generating');
@@ -84,7 +85,7 @@ const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
     };
     runAutoGenerate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [characterConfirmed, characterFile, pendingText]);
+  }, [characterFile, pendingText]);
 
   const saveSettings = () => {
     localStorage.setItem('snafty_regulation', regulation);
@@ -115,15 +116,15 @@ const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
       setExtractedText(text);
       if (onStoryExtracted) onStoryExtracted(text);
 
-      // キャラクター画像がない、または設定完了していない場合はポップアップを表示
-      if (!characterFile || !characterConfirmed) {
+      // キャラクター画像がない場合はポップアップを表示して設定を促す
+      if (!characterFile) {
         setPendingText(text);
         setShowCharacterPopup(true);
         setStep('extracted');
         return;
       }
 
-      // キャラクター画像があり、設定完了している場合は自動フロー実行
+      // キャラクター画像がある場合は自動フロー実行（Step 1-5）
       if (onFullAutoGenerate) {
         setStep('generating');
         await onFullAutoGenerate(text);
@@ -278,7 +279,6 @@ const StoryPdfUploader: React.FC<StoryPdfUploaderProps> = ({
               className="w-full bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg p-2 text-xs text-[#333] dark:text-gray-300 focus:outline-none focus:border-violet-500/50 transition-colors mb-4"
             >
               <option value="openai">ChatGPT (gpt-4o)</option>
-              <option value="claude">Claude (claude-sonnet-4)</option>
             </select>
           </div>
 

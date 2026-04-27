@@ -2,6 +2,15 @@ export const config = {
   maxDuration: 60,
 };
 
+// 許可するURLドメインのホワイトリスト
+const ALLOWED_HOSTS = [
+  'fal.media',
+  'storage.googleapis.com',
+  'v3.fal.media',
+  'queue.fal.run',
+  'fal.run',
+];
+
 export default async function handler(req, res) {
   // CORS headers
   const allowedOrigin = process.env.CORS_ALLOWED_ORIGIN 
@@ -18,6 +27,23 @@ export default async function handler(req, res) {
   const { url } = req.query;
   if (!url) {
     return res.status(400).json({ error: 'Missing url parameter' });
+  }
+
+  // SSRF対策: URLのホストがホワイトリストに含まれるか検証
+  try {
+    const parsedUrl = new URL(url);
+    const isAllowed = ALLOWED_HOSTS.some(host => 
+      parsedUrl.hostname === host || parsedUrl.hostname.endsWith('.' + host)
+    );
+    if (!isAllowed) {
+      return res.status(403).json({ error: 'URL host not allowed', host: parsedUrl.hostname });
+    }
+    // HTTPSのみ許可
+    if (parsedUrl.protocol !== 'https:') {
+      return res.status(403).json({ error: 'Only HTTPS URLs are allowed' });
+    }
+  } catch {
+    return res.status(400).json({ error: 'Invalid URL' });
   }
 
   try {

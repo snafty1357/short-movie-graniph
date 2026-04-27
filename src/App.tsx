@@ -12,11 +12,11 @@ const ShortVideoModal = lazy(() => import('./components/ShortVideoModal'));
 const StoryPdfUploader = lazy(() => import('./components/StoryPdfUploader'));
 const StoryboardWorkflowModal = lazy(() => import('./components/StoryboardWorkflowModal'));
 
-import { User, Users, Sun, Moon, UserCircle, RotateCcw, RefreshCw, Pencil, ChevronDown, Sparkles, Image as ImageIcon, Loader2, Upload, Play, BookOpen, History, Save, Trash2, FolderOpen, Maximize2, X, Plus, Search, Download, Camera, Aperture, Focus, Film, Video, Layers } from 'lucide-react';
+import { User, Users, Sun, Moon, UserCircle, RotateCcw, RefreshCw, Pencil, ChevronDown, Sparkles, Image as ImageIcon, Loader2, Upload, Play, BookOpen, History, Save, Trash2, FolderOpen, Maximize2, X, Plus, Search, Download, Camera, Aperture, Focus, Film, Video, Layers, FileText } from 'lucide-react';
 import { generatePose, fileToDataUrl, generateKlingVideo } from './services/falService';
-import { generateFixedElements, generateCutComposition, compositionRowToCutItem, DEFAULT_FIXED_META_PROMPT, DEFAULT_REGULATION, DEFAULT_META_PROMPT, type AiModelType } from './services/storyPdfService';
+import { generateFixedElements, generateCutComposition, compositionRowToCutItemBasic, fillCutPrompts, DEFAULT_FIXED_META_PROMPT, DEFAULT_REGULATION, DEFAULT_META_PROMPT, type AiModelType } from './services/storyPdfService';
 import { getEnabledAiModels, getSelectedModelId, setSelectedModelId, getProviderFromModelId, getApiModelName, type AiModelVersion } from './services/aiModelConfig';
-import { getProjectHistory, saveToProjectHistory, removeFromProjectHistory, generateProjectName, DEFAULT_BUDGET, type ProjectHistoryEntry, type ProjectBudget, type GenerationTimes } from './services/projectHistoryService';
+import { getProjectHistory, saveToProjectHistory, updateProjectHistory, removeFromProjectHistory, generateProjectName, DEFAULT_BUDGET, type ProjectHistoryEntry, type ProjectBudget, type GenerationTimes } from './services/projectHistoryService';
 
 
 
@@ -244,7 +244,7 @@ const App: React.FC = () => {
   const fixedPanelRef = useRef<HTMLDivElement>(null);
 
   // Video Generation Settings
-  const [videoGenModel, setVideoGenModel] = useState<string>('kling');
+  const [videoGenModel, setVideoGenModel] = useState<string>('kling-2.6');
   const [videoPromptStyle, setVideoPromptStyle] = useState('masterpiece, 8k resolution, highly detailed, smooth motion, high fps');
   const [videoPromptNegative, setVideoPromptNegative] = useState('');
   const [videoMetaPrompt, setVideoMetaPrompt] = useState('動画生成AIに渡すモーション指示のルールを設定します。');
@@ -268,28 +268,50 @@ const App: React.FC = () => {
   type ApiStatus = 'checking' | 'ok' | 'error';
   const [apiStatuses, setApiStatuses] = useState<Record<string, ApiStatus>>({
     openai: 'checking',
-    claude: 'checking',
+    fal: 'checking',
   });
 
   useEffect(() => {
-    const checkApi = async (provider: string, model: string) => {
+    // OpenAI チェック
+    const checkOpenAI = async () => {
       try {
-        const res = await fetch(`/api/${provider}`, {
+        const res = await fetch(`/api/openai`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model,
+            model: 'gpt-4o-mini',
             messages: [{ role: 'user', content: 'ping' }],
             max_tokens: 5,
           }),
         });
-        setApiStatuses(prev => ({ ...prev, [provider]: res.ok ? 'ok' : 'error' }));
+        setApiStatuses(prev => ({ ...prev, openai: res.ok ? 'ok' : 'error' }));
       } catch {
-        setApiStatuses(prev => ({ ...prev, [provider]: 'error' }));
+        setApiStatuses(prev => ({ ...prev, openai: 'error' }));
       }
     };
-    checkApi('openai', 'gpt-4o-mini');
-    checkApi('claude', 'claude-3-haiku-20240307');
+
+    // fal.ai チェック
+    const checkFal = async () => {
+      try {
+        const falParams = new URLSearchParams({ path: 'fal-ai/flux/dev' });
+        const res = await fetch(`/api/proxy?${falParams.toString()}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: 'test',
+            num_images: 1,
+            sync_mode: true,
+          }),
+        });
+        // fal.aiはキューに入れるだけでもOKを返すので、レスポンスがあればOK
+        setApiStatuses(prev => ({ ...prev, fal: res.ok ? 'ok' : 'error' }));
+      } catch {
+        setApiStatuses(prev => ({ ...prev, fal: 'error' }));
+      }
+    };
+
+    checkOpenAI();
+    checkFal();
   }, []);
 
   useEffect(() => {
@@ -298,7 +320,7 @@ const App: React.FC = () => {
       setFixedElementMetaPrompt(savedFixedMeta);
     }
     const savedAiModel = localStorage.getItem('snafty_ai_model') as AiModelType;
-    if (savedAiModel === 'openai' || savedAiModel === 'claude') {
+    if (savedAiModel === 'openai') {
       setAiModel(savedAiModel);
     }
 
@@ -341,7 +363,7 @@ const App: React.FC = () => {
 
 
 
-  const updateCutField = (id: number, field: 'title' | 'prompt' | 'camera' | 'semanticPrompt' | 'expression' | 'gaze' | 'pose' | 'walkingStyle' | 'walkPosition' | 'moveDistance' | 'action' | 'background' | 'backgroundPrompt' | 'productEmphasis' | 'duration' | 'motionType' | 'cameraMovement' | 'transition' | 'videoPrompt' | 'motionIntensity' | 'startFrame' | 'endFrame', value: string) => {
+  const updateCutField = (id: number, field: 'title' | 'prompt' | 'camera' | 'semanticPrompt' | 'expression' | 'gaze' | 'pose' | 'walkingStyle' | 'walkPosition' | 'moveDistance' | 'action' | 'background' | 'backgroundPrompt' | 'productEmphasis' | 'duration' | 'motionType' | 'cameraMovement' | 'transition' | 'videoPrompt' | 'motionIntensity' | 'startFrame' | 'endFrame' | 'lighting' | 'mainCharPosition' | 'ipPosition' | 'mainIpRelation' | 'mainCharExpression' | 'ipExpression' | 'ipStartFrame' | 'ipEndFrame', value: string) => {
     setCuts(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c));
   };
 
@@ -494,6 +516,7 @@ Output ONLY the formatted prompt, no explanations.`
     } catch (err) {
       console.error('Field translation error:', err);
       alert('英語化に失敗しました: ' + (err instanceof Error ? err.message : '不明なエラー'));
+    } finally {
       setRegeneratingCutId(null);
     }
   };
@@ -815,19 +838,26 @@ Output ONLY the formatted prompt, no explanations.`
         console.log(`[AutoGenerate] Cut ${i+1}: ipPresence=${cut.ipPresence}, ipAction=${cut.ipAction}, ipExpression=${cut.ipExpression}, ipPosition=${cut.ipPosition}`);
       });
 
-      const newCuts = cutResult.cuts.map((row, i) => compositionRowToCutItem(row, i));
+      // Phase 1: カット割りの基本情報のみで先に表示（プロンプトは空）
+      const basicCuts = cutResult.cuts.map((row, i) => compositionRowToCutItemBasic(row, i));
+      console.log('[AutoGenerate] Phase 1: カット割りを表示（プロンプト未生成）');
+      setCuts(basicCuts as any);
+      setEditingCutId(null);
+      setStagePrompt(generatedFixed);
+      setIsGeneratingFixed(false);
+      console.log('[AutoGenerate] Generated fixed elements:', generatedFixed);
+
+      // Phase 2: プロンプトを一括で埋める
+      console.log('[AutoGenerate] Phase 2: プロンプト生成...');
+      const newCuts = basicCuts.map(cut => fillCutPrompts(cut));
+      setCuts(newCuts as any);
+      console.log('[AutoGenerate] Phase 2: 全カットのプロンプト生成完了');
 
       // デバッグログ: 変換後のカットを確認
       console.log('[AutoGenerate] Converted cuts:', newCuts);
       newCuts.forEach((cut, i) => {
         console.log(`[AutoGenerate] CutItem ${i+1}: showSub=${cut.showSub}, ipPrompt=${cut.ipPrompt}`);
       });
-
-      setCuts(newCuts);
-      setEditingCutId(null);
-      setStagePrompt(generatedFixed);
-      setIsGeneratingFixed(false);
-      console.log('[AutoGenerate] Generated fixed elements:', generatedFixed);
 
       // 生成時間を記録
       const totalTime = Date.now() - totalStartTime;
@@ -872,10 +902,9 @@ Output ONLY the formatted prompt, no explanations.`
       console.log('[AutoGenerate] 自動保存完了:', entry.name);
       console.log('[AutoGenerate] Step 1+2 完了！UI反映済み');
 
-      // Step 3: 各カットのプロンプトを英語で再生成（バックグラウンド）
-      // UIブロックせず非同期で実行し、完了次第カットを更新する
-      const bgAiEndpoint = `/api/${aiModel}`;
-      const bgAiModelName = aiModel === 'openai' ? 'gpt-4o' : 'claude-sonnet-4-20250514';
+      // Step 3: 各カットのプロンプトを英語で再生成
+      const bgAiEndpoint = `/api/${getProviderFromModelId(selectedModelId)}`;
+      const bgAiModelName = getApiModelName(selectedModelId);
       const bgCutPrompts = newCuts.map(c => ({
         id: c.id,
         title: c.title,
@@ -886,19 +915,17 @@ Output ONLY the formatted prompt, no explanations.`
       const bgGeneratedFixed = generatedFixed;
       const bgStillImageMetaPrompt = stillImageMetaPrompt;
 
-      // fire-and-forget: awaitしない
-      (async () => {
-        try {
-          console.log('[AutoGenerate/BG] Step 3: 英語プロンプト再生成をバックグラウンドで開始...');
-          const regenerateResponse = await fetch(bgAiEndpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              model: bgAiModelName,
-              messages: [
-                {
-                  role: 'system',
-                  content: `You are an expert in fal.ai nanobanana 2 image generation prompts. Create optimized prompts using [tag] format for each cut.
+      try {
+        console.log('[AutoGenerate] Step 3: 英語プロンプト再生成を開始...');
+        const regenerateResponse = await fetch(bgAiEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: bgAiModelName,
+            messages: [
+              {
+                role: 'system',
+                content: `You are an expert in fal.ai nanobanana 2 image generation prompts. Create optimized prompts using [tag] format for each cut.
 
 For each cut, create a prompt in this format:
 [POSITIVE]
@@ -916,10 +943,10 @@ Guidelines:
 - Common negatives: [blurry], [low quality], [bad anatomy], [extra limbs], [duplicate]
 
 Output as JSON array: [{"id": number, "prompt": "[POSITIVE]...[/POSITIVE][NEGATIVE]...[/NEGATIVE]"}, ...]`
-                },
-                {
-                  role: 'user',
-                  content: `静止画メタプロンプト（スタイル指示）:
+              },
+              {
+                role: 'user',
+                content: `静止画メタプロンプト（スタイル指示）:
 ${bgStillImageMetaPrompt}
 
 要素固定プロンプト（背景・環境）:
@@ -934,35 +961,238 @@ ${bgCutPrompts.map(c => `ID: ${c.id}
 IP情報: ${c.ipPrompt || 'なし'}`).join('\n\n')}
 
 JSON配列形式で出力してください。`
-                }
-              ],
-              max_tokens: 2000
-            })
-          });
+              }
+            ],
+            max_tokens: 2000
+          })
+        });
 
-          if (regenerateResponse.ok) {
-            const regenerateData = await regenerateResponse.json();
-            const content = regenerateData.choices?.[0]?.message?.content?.trim();
+        if (regenerateResponse.ok) {
+          const regenerateData = await regenerateResponse.json();
+          const content = regenerateData.choices?.[0]?.message?.content?.trim();
 
-            const jsonMatch = content?.match(/\[[\s\S]*\]/);
-            if (jsonMatch) {
-              const regeneratedPrompts = JSON.parse(jsonMatch[0]);
+          const jsonMatch = content?.match(/\[[\s\S]*\]/);
+          if (jsonMatch) {
+            const regeneratedPrompts = JSON.parse(jsonMatch[0]);
 
-              // 最新のcuts stateに対してプロンプトだけ更新（他の変更を上書きしない）
-              setCuts(prev => prev.map(cut => {
-                const regenerated = regeneratedPrompts.find((r: { id: number; prompt?: string }) => r.id === cut.id);
-                if (regenerated && regenerated.prompt) {
-                  return { ...cut, prompt: regenerated.prompt };
-                }
-                return cut;
-              }));
-              console.log('[AutoGenerate/BG] 英語プロンプト再生成完了 ✓');
-            }
+            // 最新のcuts stateに対してプロンプトだけ更新（他の変更を上書きしない）
+            setCuts(prev => prev.map(cut => {
+              const regenerated = regeneratedPrompts.find((r: { id: number; prompt?: string }) => r.id === cut.id);
+              if (regenerated && regenerated.prompt) {
+                return { ...cut, prompt: regenerated.prompt };
+              }
+              return cut;
+            }));
+            console.log('[AutoGenerate] Step 3: 英語プロンプト再生成完了 ✓');
           }
-        } catch (bgErr) {
-          console.error('[AutoGenerate/BG] バックグラウンド英語化エラー（UI影響なし）:', bgErr);
         }
-      })();
+      } catch (bgErr) {
+        console.warn('[AutoGenerate] Step 3: 英語化に失敗。カットのプロンプトは日本語のまま残っている可能性があります:', bgErr);
+      }
+
+      // Step 4: 全体背景画像を自動生成
+      try {
+        console.log('[AutoGenerate] Step 4: 全体背景画像生成を開始...');
+        setIsGeneratingGlobalBackground(true);
+
+        // AIでgeneratedFixedを英語プロンプトに変換
+        const promptResponse = await fetch(bgAiEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: bgAiModelName,
+            messages: [
+              {
+                role: 'system',
+                content: `You are an expert at creating background image prompts for AI image generation. Translate the following Japanese scene description into a detailed English prompt for an overarching background scene WITHOUT any people or characters.`
+              },
+              {
+                role: 'user',
+                content: generatedFixed
+              }
+            ],
+            max_tokens: 300
+          })
+        });
+
+        let bgPrompt = generatedFixed;
+        if (promptResponse.ok) {
+          const promptData = await promptResponse.json();
+          bgPrompt = promptData.choices?.[0]?.message?.content || promptData.candidates?.[0]?.content?.parts?.[0]?.text || generatedFixed;
+        }
+
+        const finalPrompt = `${bgPrompt}, ${cameraType}, lens ${lensType}, ${colorGrade} color grading, ${depthOfField} depth of field, no people, empty scene, high quality background, 8k resolution`;
+        const falParams = new URLSearchParams({ path: 'fal-ai/flux/dev' });
+        const falResponse = await fetch(`/api/proxy?${falParams.toString()}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: finalPrompt,
+            image_size: 'landscape_16_9',
+            num_images: 1,
+            enable_safety_checker: false
+          })
+        });
+
+        if (!falResponse.ok) throw new Error('Global background generation failed');
+        let falData = await falResponse.json();
+
+        // ポーリングで完了を待つ
+        if (falData.status_url && falData.response_url) {
+          for (let i = 0; i < 60; i++) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            const statusRes = await fetch(`/api/proxy?url=${encodeURIComponent(falData.status_url)}`);
+            const statusData = await statusRes.json();
+            if (statusData.status === 'COMPLETED') {
+              const resultRes = await fetch(`/api/proxy?url=${encodeURIComponent(falData.response_url)}`);
+              falData = await resultRes.json();
+              break;
+            }
+            if (statusData.status === 'FAILED') throw new Error('Global background generation failed');
+          }
+        }
+
+        const imageUrl = falData.images?.[0]?.url || falData.output?.images?.[0]?.url || falData.image?.url || (typeof falData.images?.[0] === 'string' ? falData.images[0] : null);
+        if (imageUrl) {
+          setGlobalBackgroundImageUrl(imageUrl);
+          // プロジェクト履歴を更新して全体背景画像URLを保存
+          if (entry.id) {
+            updateProjectHistory(entry.id, { globalBackgroundImageUrl: imageUrl });
+            setProjectHistory(getProjectHistory());
+            console.log('[AutoGenerate] Step 4: プロジェクト履歴を更新（全体背景画像URL保存）');
+          }
+          console.log('[AutoGenerate] Step 4: 全体背景画像生成完了 ✓');
+        } else {
+          throw new Error('No image URL returned');
+        }
+      } catch (bgErr) {
+        console.warn('[AutoGenerate] Step 4: 全体背景画像生成に失敗:', bgErr);
+      } finally {
+        setIsGeneratingGlobalBackground(false);
+      }
+
+      // Step 5: 全カットの静止画を一括生成（メインキャラ画像がある場合のみ）
+      if (humanFile) {
+        console.log('[AutoGenerate] Step 5: 全カットの静止画一括生成を開始...');
+        // generateAllCutImagesの処理をインラインで実行
+        const enabledCutsToGenerate = newCuts.filter(c => c.enabled);
+        if (enabledCutsToGenerate.length > 0) {
+          setIsGenerating(true);
+          setError(null);
+
+          // 全カットを生成中状態にマーク
+          setCuts(prev => prev.map(c =>
+            enabledCutsToGenerate.some(ec => ec.id === c.id)
+              ? { ...c, isGenerating: true, errorMessage: undefined }
+              : c
+          ));
+
+          try {
+            const humanDataUrl = await fileToDataUrl(humanFile);
+            const subCharDataUrl = subCharFile ? await fileToDataUrl(subCharFile) : null;
+            const cameraSettings = [
+              cameraType !== 'none' ? `shot on ${cameraType}` : '',
+              lensType !== 'none' ? `${lensType} lens` : '',
+              depthOfField !== 'none' ? `${depthOfField} depth of field` : '',
+              colorGrade !== 'none' ? `${colorGrade} color grading` : ''
+            ].filter(Boolean).join(', ');
+            const combinedBase = [stillImageStyle, stagePrompt, cameraSettings].filter(Boolean).join(', ');
+            const mainDetailPrompt = getMainCharDetailPrompt();
+            const subDetailPrompt = getSubCharDetailPrompt();
+
+            // 全カットを同時に生成
+            const generatePromises = enabledCutsToGenerate.map(async (cut) => {
+              try {
+                // プロンプトから[POSITIVE]と[NEGATIVE]セクションを抽出
+                const cutPrompt = cut.prompt || '';
+                const positiveMatch = cutPrompt.match(/\[POSITIVE\]([\s\S]*?)\[\/POSITIVE\]/i);
+                const negativeMatch = cutPrompt.match(/\[NEGATIVE\]([\s\S]*?)\[\/NEGATIVE\]/i);
+
+                let positivePrompt = positiveMatch ? positiveMatch[1].trim() : cutPrompt;
+                let negativePrompt = negativeMatch ? negativeMatch[1].trim() : '';
+
+                // カメラ設定を追加
+                if (cut.camera) {
+                  positivePrompt = `[${cut.camera}], ${positivePrompt}`;
+                }
+
+                // メインキャラクターのプロンプトと詳細を追加
+                const mainPromptParts = [mainCharPrompt, mainCustomPrompt, mainDetailPrompt].filter(Boolean).join(', ');
+                if (mainPromptParts) {
+                  positivePrompt = `${mainPromptParts}, ${positivePrompt}`;
+                }
+                if (combinedBase) {
+                  positivePrompt = `${combinedBase}, ${positivePrompt}`;
+                }
+
+                // ネガティブプロンプトを統合
+                if (stillImageNegative) {
+                  negativePrompt = negativePrompt ? `${negativePrompt}, ${stillImageNegative}` : stillImageNegative;
+                }
+
+                // IPキャラクターの処理（サブキャラ画像があれば使用、または cut.showSub が true の場合）
+                const useSubChar = subCharDataUrl && (cut.showSub || subCharPrompt);
+                const ipDescription = [cut.ipPrompt || subCharPrompt || '', subDetailPrompt].filter(Boolean).join(', ');
+                if (useSubChar && ipDescription) {
+                  positivePrompt += `, [companion character: ${ipDescription}]`;
+                }
+
+                // 最終プロンプトを[POSITIVE][NEGATIVE]形式で構築
+                const finalPrompt = `[POSITIVE]\n${positivePrompt}\n[/POSITIVE]\n[NEGATIVE]\n${negativePrompt || '[blurry], [low quality], [bad anatomy]'}\n[/NEGATIVE]`;
+
+                const batchQualityToRes = { ultra: '2K' as const, high: '1K' as const, standard: '1K' as const };
+                const result = await generatePose({
+                  humanImageUrl: humanDataUrl,
+                  pose: finalPrompt,
+                  resolution: batchQualityToRes[imageQuality as keyof typeof batchQualityToRes] || '1K',
+                  format: 'jpeg',
+                  subCharacterImageUrl: useSubChar ? subCharDataUrl : undefined,
+                  subCharacterPrompt: useSubChar ? ipDescription : undefined,
+                });
+
+                // 成功時に即座に状態を更新
+                setCuts(prev => prev.map(c => c.id === cut.id ? {
+                  ...c,
+                  isGenerating: false,
+                  generatedImageUrl: result.imageUrl
+                } : c));
+
+                return { id: cut.id, success: true };
+              } catch (err) {
+                const errMessage = err instanceof Error ? err.message : '生成失敗';
+                console.error(`Cut ${cut.id} generation error:`, err);
+                setCuts(prev => prev.map(c => c.id === cut.id ? {
+                  ...c,
+                  isGenerating: false,
+                  errorMessage: errMessage
+                } : c));
+                return { id: cut.id, success: false, error: errMessage };
+              }
+            });
+
+            // 全ての生成を待機
+            const results = await Promise.all(generatePromises);
+            const successCount = results.filter(r => r.success).length;
+            console.log(`[AutoGenerate] Step 5: ${successCount}/${enabledCutsToGenerate.length} 静止画生成完了 ✓`);
+
+            // 画像生成完了後、動画プロンプトを各カットに自動設定
+            setCuts(prevCuts => prevCuts.map(cut => {
+              if (cut.enabled && cut.generatedImageUrl) {
+                const autoVideoPrompt = generateVideoPromptFromSettings(cut);
+                return { ...cut, videoPrompt: autoVideoPrompt };
+              }
+              return cut;
+            }));
+          } catch (err) {
+            console.error('[AutoGenerate] Step 5: 静止画生成エラー:', err);
+            setError(err instanceof Error ? err.message : '画像生成中にエラーが発生しました');
+          } finally {
+            setIsGenerating(false);
+          }
+        }
+      } else {
+        console.log('[AutoGenerate] Step 5: メインキャラ画像が未設定のためスキップ');
+      }
     } catch (err) {
       console.error('[AutoGenerate] Error:', err);
       throw err;
@@ -1033,10 +1263,11 @@ JSON配列形式で出力してください。`
       // 最終プロンプトを[POSITIVE][NEGATIVE]形式で構築
       const finalPrompt = `[POSITIVE]\n${positivePrompt}\n[/POSITIVE]\n[NEGATIVE]\n${negativePrompt || '[blurry], [low quality], [bad anatomy]'}\n[/NEGATIVE]`;
 
+      const qualityToResolution = { ultra: '2K' as const, high: '1K' as const, standard: '1K' as const };
       const result = await generatePose({
         humanImageUrl: humanDataUrl,
         pose: finalPrompt,
-        resolution: '1K',
+        resolution: qualityToResolution[imageQuality as keyof typeof qualityToResolution] || '1K',
         format: 'jpeg',
         subCharacterImageUrl: subCharDataUrl,
         subCharacterPrompt: ipDescription,
@@ -1199,18 +1430,11 @@ Output ONLY the formatted tags and prompt.`
       // 動画プロンプトをカットに保存
       setCuts(prev => prev.map(c => c.id === cutId ? { ...c, videoPrompt } : c));
 
-      // 尺を取得（デフォルト5秒）
-      const durationMap: Record<string, '5' | '10'> = {
-        '2秒': '5',
-        '3秒': '5',
-        '5秒': '5',
-      };
-      const duration = durationMap[targetCut.duration || '5秒'] || '5';
-
+      // 尺は5秒固定
       const result = await generateKlingVideo({
         imageUrl: targetCut.generatedImageUrl,
         prompt: videoPrompt,
-        duration,
+        duration: '5',
         aspectRatio: '9:16',
         model: 'v2.6-pro',
       });
@@ -1261,18 +1485,11 @@ Output ONLY the formatted tags and prompt.`
         let videoPrompt = generateVideoPromptFromSettings(cut);
         videoPrompt = await translateVideoPrompt(videoPrompt);
 
-        // 尺を取得（デフォルト5秒）
-        const durationMap: Record<string, '5' | '10'> = {
-          '2秒': '5',
-          '3秒': '5',
-          '5秒': '5',
-        };
-        const duration = durationMap[cut.duration || '5秒'] || '5';
-
+        // 尺は5秒固定
         const result = await generateKlingVideo({
           imageUrl: cut.generatedImageUrl!,
           prompt: videoPrompt,
-          duration,
+          duration: '5',
           aspectRatio: '9:16',
           model: 'v2.6-pro',
         });
@@ -1363,8 +1580,8 @@ Output ONLY the formatted tags and prompt.`
             negativePrompt = negativePrompt ? `${negativePrompt}, ${stillImageNegative}` : stillImageNegative;
           }
 
-          // IPキャラクターの処理
-          const useSubChar = cut.showSub && subCharDataUrl && subCharPrompt;
+          // IPキャラクターの処理（サブキャラ画像があれば使用、または cut.showSub が true の場合）
+          const useSubChar = subCharDataUrl && (cut.showSub || subCharPrompt);
           const ipDescription = [cut.ipPrompt || subCharPrompt || '', subDetailPrompt].filter(Boolean).join(', ');
           if (useSubChar && ipDescription) {
             positivePrompt += `, [companion character: ${ipDescription}]`;
@@ -1373,10 +1590,11 @@ Output ONLY the formatted tags and prompt.`
           // 最終プロンプトを[POSITIVE][NEGATIVE]形式で構築
           const finalPrompt = `[POSITIVE]\n${positivePrompt}\n[/POSITIVE]\n[NEGATIVE]\n${negativePrompt || '[blurry], [low quality], [bad anatomy]'}\n[/NEGATIVE]`;
 
+          const batchQualityToRes = { ultra: '2K' as const, high: '1K' as const, standard: '1K' as const };
           const result = await generatePose({
             humanImageUrl: humanDataUrl,
             pose: finalPrompt,
-            resolution: '1K',
+            resolution: batchQualityToRes[imageQuality as keyof typeof batchQualityToRes] || '1K',
             format: 'jpeg',
             subCharacterImageUrl: useSubChar ? subCharDataUrl : undefined,
             subCharacterPrompt: useSubChar ? ipDescription : undefined,
@@ -1431,6 +1649,10 @@ Output ONLY the formatted tags and prompt.`
   const [characterConfirmed, setCharacterConfirmed] = useState(false);
   const [pendingRegenerate, setPendingRegenerate] = useState(false);
   const charPanelRef = useRef<HTMLDivElement>(null);
+
+  // メタプロンプト設定パネル
+  const [metaPromptPanelOpen, setMetaPromptPanelOpen] = useState(false);
+  const metaPromptPanelRef = useRef<HTMLDivElement>(null);
 
   // キャラクター詳細ブロック（DETAIL_PRESETSはhooksからインポート）
   interface CharacterDetailBlock {
@@ -1571,11 +1793,13 @@ Output ONLY the formatted tags and prompt.`
         return;
       }
 
-      const response = await fetch('/api/claude', {
+      const charGenEndpoint = `/api/${getProviderFromModelId(selectedModelId)}`;
+      const charGenModel = getApiModelName(selectedModelId);
+      const response = await fetch(charGenEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
+          model: charGenModel,
           max_tokens: 500,
           messages: [{
             role: 'user',
@@ -1591,7 +1815,7 @@ ${inputContext}
       });
 
       const data = await response.json();
-      const generatedPrompt = data.content?.[0]?.text || data.content || '';
+      const generatedPrompt = data.choices?.[0]?.message?.content || '';
       if (generatedPrompt) {
         setMainCharPrompt(generatedPrompt.trim());
       }
@@ -1625,11 +1849,13 @@ ${inputContext}
         return;
       }
 
-      const response = await fetch('/api/claude', {
+      const ipGenEndpoint = `/api/${getProviderFromModelId(selectedModelId)}`;
+      const ipGenModel = getApiModelName(selectedModelId);
+      const response = await fetch(ipGenEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
+          model: ipGenModel,
           max_tokens: 500,
           messages: [{
             role: 'user',
@@ -1645,7 +1871,7 @@ ${inputContext}
       });
 
       const data = await response.json();
-      const generatedPrompt = data.content?.[0]?.text || data.content || '';
+      const generatedPrompt = data.choices?.[0]?.message?.content || '';
       if (generatedPrompt) {
         setCustomSubPrompt(generatedPrompt.trim());
       }
@@ -1706,12 +1932,15 @@ ${inputContext}
       if (historyPanelRef.current && !historyPanelRef.current.contains(e.target as Node)) {
         setHistoryPanelOpen(false);
       }
+      if (metaPromptPanelRef.current && !metaPromptPanelRef.current.contains(e.target as Node)) {
+        setMetaPromptPanelOpen(false);
+      }
     };
-    if (charPanelOpen || stillPromptPanelOpen || semanticPanelOpen || productPanelOpen || fixedPanelOpen || historyPanelOpen) {
+    if (charPanelOpen || stillPromptPanelOpen || semanticPanelOpen || productPanelOpen || fixedPanelOpen || historyPanelOpen || metaPromptPanelOpen) {
       document.addEventListener('mousedown', handleClickOutside);
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [charPanelOpen, stillPromptPanelOpen, semanticPanelOpen, productPanelOpen, fixedPanelOpen, historyPanelOpen]);
+  }, [charPanelOpen, stillPromptPanelOpen, semanticPanelOpen, productPanelOpen, fixedPanelOpen, historyPanelOpen, metaPromptPanelOpen]);
 
   // VideoModal状態
   const [videoModalOpen, setVideoModalOpen] = useState(false);
@@ -1750,6 +1979,7 @@ ${inputContext}
       aiModel,
       budget: projectBudget,
       generationTimes: generationTimes,
+      globalBackgroundImageUrl: globalBackgroundImageUrl || undefined,
     });
     setCurrentProjectId(entry.id);
     setProjectHistory(getProjectHistory());
@@ -1759,6 +1989,7 @@ ${inputContext}
   // プロジェクトを復元
   const loadProject = (entry: ProjectHistoryEntry) => {
     setCuts(entry.cuts);
+    setGlobalBackgroundImageUrl(entry.globalBackgroundImageUrl || null);
     setStagePrompt(entry.stagePrompt);
     setExtractedPdfText(entry.extractedPdfText);
     setMainCharPrompt(entry.mainCharPrompt || '');
@@ -1796,10 +2027,11 @@ ${inputContext}
       }
     };
     runRegenerate();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingRegenerate, characterConfirmed, humanFile, extractedPdfText]);
 
   // タブタイトルアニメーション
-  const originalTitle = useRef('ショート動画AI - 自動生成');
+  const originalTitle = useRef('Snafty Studio - Short Movie AI');
   const titleIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -1808,7 +2040,7 @@ ${inputContext}
       const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
       let i = 0;
       titleIntervalRef.current = setInterval(() => {
-        document.title = `${frames[i % frames.length]} 着画生成中... | 着てみるAI`;
+        document.title = `${frames[i % frames.length]} 生成中... | Snafty Studio`;
         i++;
       }, 100);
     } else {
@@ -1830,7 +2062,7 @@ ${inputContext}
   const prevResultsCount = useRef(results.length);
   useEffect(() => {
     if (results.length > prevResultsCount.current) {
-      document.title = '✅ 着画生成完了！ | 着てみるAI';
+      document.title = '✅ 生成完了！ | Snafty Studio';
       const timer = setTimeout(() => {
         document.title = originalTitle.current;
       }, 5000);
@@ -1845,15 +2077,19 @@ ${inputContext}
   // モデル画像選択（正面）
   const handleHumanSelect = useCallback(async (file: File) => {
     setHumanFile(file);
-    const url = URL.createObjectURL(file);
-    setHumanPreview(url);
+    setHumanPreview(prev => {
+      if (prev) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(file);
+    });
   }, []);
 
   // サブキャラクター画像選択
   const handleSubCharSelect = useCallback(async (file: File) => {
     setSubCharFile(file);
-    const url = URL.createObjectURL(file);
-    setSubCharPreview(url);
+    setSubCharPreview(prev => {
+      if (prev) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(file);
+    });
   }, []);
 
 
@@ -1864,7 +2100,7 @@ ${inputContext}
       <div className="min-h-screen bg-[#FAFAFA] dark:bg-[#050508] flex items-center justify-center">
         <div className="text-center animate-in">
           <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-[#00BFA5] to-[#78909C] flex items-center justify-center text-4xl font-black mx-auto mb-6 animate-pulse-glow">
-            K
+            S
           </div>
           <p className="text-[#78909C] text-sm">読み込み中...</p>
         </div>
@@ -1900,8 +2136,9 @@ ${inputContext}
               </h1>
               <p className="text-[10px] text-[#78909C] dark:text-gray-500 -mt-0.5 tracking-widest font-medium">Short Movie AI Generator</p>
             </div>
-            {/* API Status Indicator (GPT only) */}
-            <div className="flex items-center gap-1.5 ml-2 px-2.5 py-1.5 bg-gray-50 dark:bg-white/5 rounded-lg border border-gray-200 dark:border-white/10">
+            {/* API Status Indicator */}
+            <div className="flex items-center gap-2 ml-2 px-2.5 py-1.5 bg-gray-50 dark:bg-white/5 rounded-lg border border-gray-200 dark:border-white/10">
+              {/* GPT Status */}
               <div className="flex items-center gap-1" title={`GPT: ${apiStatuses['openai'] === 'ok' ? '稼働中' : apiStatuses['openai'] === 'error' ? 'エラー' : 'チェック中'}`}>
                 <div className={`w-1.5 h-1.5 rounded-full ${
                   apiStatuses['openai'] === 'ok' ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50' :
@@ -1913,6 +2150,21 @@ ${inputContext}
                   apiStatuses['openai'] === 'error' ? 'text-red-500 dark:text-red-400' :
                   'text-gray-400'
                 }`}>GPT</span>
+              </div>
+              {/* Divider */}
+              <div className="w-px h-3 bg-gray-300 dark:bg-white/20" />
+              {/* fal.ai Status */}
+              <div className="flex items-center gap-1" title={`fal.ai: ${apiStatuses['fal'] === 'ok' ? '稼働中' : apiStatuses['fal'] === 'error' ? 'エラー' : 'チェック中'}`}>
+                <div className={`w-1.5 h-1.5 rounded-full ${
+                  apiStatuses['fal'] === 'ok' ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50' :
+                  apiStatuses['fal'] === 'error' ? 'bg-red-500 shadow-sm shadow-red-500/50' :
+                  'bg-gray-400 animate-pulse'
+                }`} />
+                <span className={`text-[8px] font-bold ${
+                  apiStatuses['fal'] === 'ok' ? 'text-emerald-600 dark:text-emerald-400' :
+                  apiStatuses['fal'] === 'error' ? 'text-red-500 dark:text-red-400' :
+                  'text-gray-400'
+                }`}>fal.ai</span>
               </div>
             </div>
           </div>
@@ -2822,6 +3074,119 @@ ${inputContext}
                 )}
               </div>
 
+              {/* Meta Prompt Settings Button */}
+              <div className="relative" ref={metaPromptPanelRef}>
+                <button
+                  onClick={() => setMetaPromptPanelOpen(!metaPromptPanelOpen)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-semibold transition-all shadow-sm ${
+                    metaPromptPanelOpen
+                      ? 'bg-orange-500/10 dark:bg-orange-500/20 border-orange-500/30 text-orange-600 dark:text-orange-300'
+                      : 'bg-[#FAFAFA] dark:bg-[#1a1a24] border-[#E0E0E0] dark:border-white/10 text-[#78909C] hover:text-[#333333] dark:hover:text-white hover:bg-[#F5F5F5] dark:hover:bg-[#2a2a36]'
+                  }`}
+                >
+                  <FileText size={16} />
+                  <span className="hidden sm:inline">メタプロンプト</span>
+                  <ChevronDown size={12} className={`transition-transform duration-200 ${metaPromptPanelOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                {/* Meta Prompt Settings Panel */}
+                {metaPromptPanelOpen && (
+                  <div className="absolute right-0 top-full mt-2 w-[400px] bg-white dark:bg-[#16161e] border border-[#E0E0E0] dark:border-white/10 rounded-2xl shadow-2xl dark:shadow-orange-500/5 p-4 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div className="flex items-center gap-2 mb-4">
+                      <div className="w-1 h-4 rounded-full bg-gradient-to-b from-orange-400 to-indigo-500"></div>
+                      <h3 className="text-xs font-bold text-[#333] dark:text-gray-200 uppercase tracking-wider">メタプロンプト設定</h3>
+                    </div>
+
+                    {/* Tab Switcher */}
+                    <div className="flex rounded-lg bg-gray-100 dark:bg-white/5 p-1 mb-4">
+                      <button
+                        onClick={() => setGenerationSettingsTab('still')}
+                        className={`flex-1 px-3 py-1.5 rounded-md text-[10px] font-bold transition-all ${
+                          generationSettingsTab === 'still'
+                            ? 'bg-white dark:bg-white/10 text-orange-600 dark:text-orange-400 shadow-sm'
+                            : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                        }`}
+                      >
+                        静止画設定
+                      </button>
+                      <button
+                        onClick={() => setGenerationSettingsTab('video')}
+                        className={`flex-1 px-3 py-1.5 rounded-md text-[10px] font-bold transition-all ${
+                          generationSettingsTab === 'video'
+                            ? 'bg-white dark:bg-white/10 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                            : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                        }`}
+                      >
+                        動画設定
+                      </button>
+                    </div>
+
+                    {/* 静止画設定 */}
+                    {generationSettingsTab === 'still' && (
+                      <div className="space-y-3">
+                        <div>
+                          <label className="text-[9px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">
+                            <span className="text-orange-500">静止画</span> メタプロンプト
+                          </label>
+                          <textarea
+                            value={stillImageMetaPrompt}
+                            onChange={(e) => setStillImageMetaPrompt(e.target.value)}
+                            placeholder="静止画生成AIへの指示ルールを設定..."
+                            className="w-full h-32 bg-orange-50 dark:bg-orange-500/5 border border-orange-200 dark:border-orange-500/20 rounded-lg p-2 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-orange-500/50 transition-colors custom-scrollbar resize-y"
+                          />
+                        </div>
+                        <div className="flex justify-end">
+                          <button
+                            onClick={saveStillPrompts}
+                            className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white text-[9px] font-bold rounded-lg transition-colors"
+                          >
+                            保存
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 動画設定 */}
+                    {generationSettingsTab === 'video' && (
+                      <div className="space-y-3">
+                        <div>
+                          <label className="text-[9px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">
+                            <span className="text-indigo-500">動画</span> メタプロンプト
+                          </label>
+                          <textarea
+                            value={videoMetaPrompt}
+                            onChange={(e) => setVideoMetaPrompt(e.target.value)}
+                            placeholder="動画生成AIへの指示ルールを設定..."
+                            className="w-full h-24 bg-indigo-50 dark:bg-indigo-500/5 border border-indigo-200 dark:border-indigo-500/20 rounded-lg p-2 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-indigo-500/50 transition-colors custom-scrollbar resize-y"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[9px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">
+                            使用モデル
+                          </label>
+                          <select
+                            value={videoGenModel}
+                            onChange={(e) => setVideoGenModel(e.target.value)}
+                            className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg p-2 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-indigo-500/50 transition-colors"
+                          >
+                            <option value="kling-2.6">Kling AI 2.6</option>
+                            <option value="kling-3.0">Kling AI 3.0</option>
+                          </select>
+                        </div>
+                        <div className="flex justify-end">
+                          <button
+                            onClick={saveVideoPrompts}
+                            className="px-3 py-1.5 bg-indigo-500 hover:bg-indigo-600 text-white text-[9px] font-bold rounded-lg transition-colors"
+                          >
+                            保存
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* Theme Toggle Button */}
               <button
                 onClick={toggleTheme}
@@ -3070,11 +3435,6 @@ ${inputContext}
                           <option key={m.id} value={m.id}>{m.name}</option>
                         ))}
                       </optgroup>
-                      <optgroup label="Anthropic" className="text-orange-600">
-                        {availableAiModels.filter(m => m.provider === 'claude').map(m => (
-                          <option key={m.id} value={m.id}>{m.name}</option>
-                        ))}
-                      </optgroup>
                     </select>
                     <div className="flex items-center gap-1">
                       <span className="text-[#78909C]">≈ $</span>
@@ -3183,17 +3543,13 @@ ${inputContext}
                     <div className="flex items-center gap-1">
                       <span className="text-violet-500">🤖</span>
                       <span className={`font-bold px-1.5 py-0.5 rounded text-[9px] ${
-                        cutGenerationStats.usedModel?.includes('claude') || cutGenerationStats.usedModel?.includes('Claude')
-                          ? 'bg-orange-100 dark:bg-orange-500/20 text-orange-600 dark:text-orange-400'
-                          : cutGenerationStats.usedModel?.includes('gpt') || cutGenerationStats.usedModel?.includes('openai')
+                        cutGenerationStats.usedModel?.includes('gpt') || cutGenerationStats.usedModel?.includes('openai')
                           ? 'bg-green-100 dark:bg-green-500/20 text-green-600 dark:text-green-400'
                           : 'bg-gray-100 dark:bg-gray-500/20 text-gray-600 dark:text-gray-400'
                       }`}>
                         {cutGenerationStats.usedModel === 'gpt-4o' ? 'GPT-4o' :
                          cutGenerationStats.usedModel === 'gpt-4o-mini' ? 'GPT-4o mini' :
-                         cutGenerationStats.usedModel === 'claude-3-5-sonnet' ? 'Claude 3.5 Sonnet' :
-                         cutGenerationStats.usedModel === 'claude-3-7-sonnet' ? 'Claude 3.7 Sonnet' :
-                         cutGenerationStats.usedModel === 'claude-sonnet-4' ? 'Claude Sonnet 4' :
+                         cutGenerationStats.usedModel === 'gpt-4-turbo' ? 'GPT-4 Turbo' :
                          cutGenerationStats.usedModel || 'Unknown'}
                       </span>
                     </div>
@@ -3246,7 +3602,7 @@ ${inputContext}
               </Suspense>
 
             {/* 画像/動画 モード切り替え */}
-            <div className="flex items-center justify-center gap-2 mb-4">
+            <div className="flex flex-col items-center gap-3 mb-4">
               <div className="flex rounded-xl border-2 border-[#E0E0E0] dark:border-white/10 overflow-hidden shadow-sm">
                 <button
                   onClick={() => setCompositionMode('image')}
@@ -3271,6 +3627,53 @@ ${inputContext}
                   動画モード
                 </button>
               </div>
+
+              {/* 一括生成ボタン */}
+              {compositionMode === 'image' ? (
+                <button
+                  onClick={generateAllCutImages}
+                  disabled={isGenerating || !humanFile || enabledCuts.length === 0}
+                  className={`flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold transition-all shadow-lg ${
+                    isGenerating || !humanFile || enabledCuts.length === 0
+                      ? 'bg-gray-200 dark:bg-white/10 text-gray-400 dark:text-gray-500 cursor-not-allowed'
+                      : 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white hover:shadow-cyan-500/40 hover:scale-105'
+                  }`}
+                >
+                  {isGenerating ? (
+                    <>
+                      <Loader2 size={18} className="animate-spin" />
+                      画像生成中...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles size={18} />
+                      すべての画像を生成 ({enabledCuts.length}カット)
+                    </>
+                  )}
+                </button>
+              ) : (
+                <button
+                  onClick={generateAllCutVideos}
+                  disabled={isGeneratingVideos || enabledCuts.filter(c => c.generatedImageUrl).length === 0}
+                  className={`flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold transition-all shadow-lg ${
+                    isGeneratingVideos || enabledCuts.filter(c => c.generatedImageUrl).length === 0
+                      ? 'bg-gray-200 dark:bg-white/10 text-gray-400 dark:text-gray-500 cursor-not-allowed'
+                      : 'bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:shadow-purple-500/40 hover:scale-105'
+                  }`}
+                >
+                  {isGeneratingVideos ? (
+                    <>
+                      <Loader2 size={18} className="animate-spin" />
+                      動画生成中...
+                    </>
+                  ) : (
+                    <>
+                      <Play size={18} />
+                      すべての動画を生成 ({enabledCuts.filter(c => c.generatedImageUrl).length}カット)
+                    </>
+                  )}
+                </button>
+              )}
             </div>
 
             {/* Composition Plan Settings */}
@@ -3814,163 +4217,15 @@ ${inputContext}
                                   className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50"
                                 />
                               </div>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* 詳細フィールド - 動画用 */}
-                        {compositionMode === 'video' && (
-                          <div className="mt-3 p-3 bg-purple-50/50 dark:bg-purple-500/[0.02] rounded-lg border border-purple-200 dark:border-purple-500/10">
-                            <label className="text-[9px] text-purple-600 dark:text-purple-400 uppercase tracking-wider mb-2 block font-bold">🎬 動画生成用設定</label>
-                            <div className="grid grid-cols-2 gap-2">
                               <div>
-                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">尺（秒数）</label>
-                                <div className="flex gap-1">
-                                  {['2秒', '3秒', '5秒'].map(d => (
-                                    <button
-                                      key={d}
-                                      onClick={() => updateCutField(cut.id, 'duration', d)}
-                                      className={`flex-1 px-1.5 py-1 rounded text-[9px] font-bold border transition-all ${
-                                        cut.duration === d
-                                          ? 'bg-purple-500 text-white border-purple-600'
-                                          : 'bg-white dark:bg-white/5 border-[#E0E0E0] dark:border-white/10 text-[#78909C] hover:text-[#333] dark:hover:text-white'
-                                      }`}
-                                    >
-                                      {d}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                              <div>
-                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">動きの強度</label>
-                                <div className="flex gap-1">
-                                  {['弱', '中', '強'].map(m => (
-                                    <button
-                                      key={m}
-                                      onClick={() => updateCutField(cut.id, 'motionIntensity', m)}
-                                      className={`flex-1 px-1.5 py-1 rounded text-[9px] font-bold border transition-all ${
-                                        cut.motionIntensity === m
-                                          ? 'bg-purple-500 text-white border-purple-600'
-                                          : 'bg-white dark:bg-white/5 border-[#E0E0E0] dark:border-white/10 text-[#78909C] hover:text-[#333] dark:hover:text-white'
-                                      }`}
-                                    >
-                                      {m}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                              <div>
-                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">動きの種類</label>
+                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">ライティング</label>
                                 <input
                                   type="text"
-                                  value={cut.motionType || ''}
-                                  onChange={(e) => updateCutField(cut.id, 'motionType', e.target.value)}
-                                  placeholder="歩行、振り返り、静止..."
-                                  className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
+                                  value={cut.lighting || ''}
+                                  onChange={(e) => updateCutField(cut.id, 'lighting', e.target.value)}
+                                  placeholder="自然光、スタジオ照明..."
+                                  className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50"
                                 />
-                              </div>
-                              <div>
-                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">カメラの動き</label>
-                                <input
-                                  type="text"
-                                  value={cut.cameraMovement || ''}
-                                  onChange={(e) => updateCutField(cut.id, 'cameraMovement', e.target.value)}
-                                  placeholder="パン、ズームイン、固定..."
-                                  className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
-                                />
-                              </div>
-                              <div>
-                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">開始フレーム</label>
-                                <input
-                                  type="text"
-                                  value={cut.startFrame || ''}
-                                  onChange={(e) => updateCutField(cut.id, 'startFrame', e.target.value)}
-                                  placeholder="立っている、画面外から..."
-                                  className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
-                                />
-                              </div>
-                              <div>
-                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">終了フレーム</label>
-                                <input
-                                  type="text"
-                                  value={cut.endFrame || ''}
-                                  onChange={(e) => updateCutField(cut.id, 'endFrame', e.target.value)}
-                                  placeholder="歩き去る、静止..."
-                                  className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
-                                />
-                              </div>
-                              <div>
-                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">トランジション</label>
-                                <div className="flex gap-1">
-                                  {['カット', 'フェード', 'ディゾルブ'].map(t => (
-                                    <button
-                                      key={t}
-                                      onClick={() => updateCutField(cut.id, 'transition', t)}
-                                      className={`flex-1 px-1 py-1 rounded text-[8px] font-bold border transition-all ${
-                                        cut.transition === t
-                                          ? 'bg-purple-500 text-white border-purple-600'
-                                          : 'bg-white dark:bg-white/5 border-[#E0E0E0] dark:border-white/10 text-[#78909C] hover:text-[#333] dark:hover:text-white'
-                                      }`}
-                                    >
-                                      {t}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                              <div>
-                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">画面位置</label>
-                                <input
-                                  type="text"
-                                  value={cut.walkPosition || ''}
-                                  onChange={(e) => updateCutField(cut.id, 'walkPosition', e.target.value)}
-                                  placeholder="中央、左→右..."
-                                  className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
-                                />
-                              </div>
-                              <div className="col-span-2">
-                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">動画プロンプト</label>
-                                <textarea
-                                  value={cut.videoPrompt || ''}
-                                  onChange={(e) => updateCutField(cut.id, 'videoPrompt', e.target.value)}
-                                  placeholder="動画生成用の詳細な動き指示..."
-                                  className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1.5 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50 resize-y min-h-[40px]"
-                                />
-                              </div>
-                              {/* 動画生成ボタン */}
-                              <div className="col-span-2 pt-3 border-t border-purple-200 dark:border-purple-500/20 mt-2">
-                                <button
-                                  onClick={() => generateVideoForCut(cut.id)}
-                                  disabled={cut.isGeneratingVideo || !cut.generatedImageUrl}
-                                  className={`w-full py-2.5 rounded-lg font-bold text-xs flex justify-center items-center gap-2 transition-all duration-300 ${
-                                    cut.isGeneratingVideo
-                                      ? 'bg-purple-400 text-white cursor-wait'
-                                      : !cut.generatedImageUrl
-                                      ? 'bg-gray-200 dark:bg-white/5 text-[#9E9E9E] dark:text-gray-500 cursor-not-allowed'
-                                      : 'bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-md shadow-purple-500/20 hover:shadow-purple-500/40 hover:scale-[1.02]'
-                                  }`}
-                                >
-                                  {cut.isGeneratingVideo ? (
-                                    <>
-                                      <Loader2 size={14} className="animate-spin" />
-                                      動画生成中...（数分かかります）
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Video size={14} />
-                                      🎬 動画を生成する
-                                    </>
-                                  )}
-                                </button>
-                                {!cut.generatedImageUrl && (
-                                  <p className="text-[9px] text-orange-500 dark:text-orange-400 mt-1.5 text-center">
-                                    ⚠️ 先に「画像用」モードで画像を生成してください
-                                  </p>
-                                )}
-                                {cut.generatedVideoUrl && (
-                                  <p className="text-[9px] text-green-500 dark:text-green-400 mt-1.5 text-center">
-                                    ✅ 動画が生成されています（左のサムネイルにマウスを乗せて再生）
-                                  </p>
-                                )}
                               </div>
                             </div>
                           </div>
@@ -4112,6 +4367,218 @@ ${inputContext}
                               )}
                             </div>
                           )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 動画生成用設定 - 常時表示 */}
+                    {compositionMode === 'video' && cut.enabled && (
+                      <div className="px-3 pb-3 pt-2 border-t border-purple-200/50 dark:border-purple-500/10">
+                        <div className="p-3 bg-purple-50/50 dark:bg-purple-500/[0.02] rounded-lg border border-purple-200 dark:border-purple-500/10">
+                          <label className="text-[9px] text-purple-600 dark:text-purple-400 uppercase tracking-wider mb-2 block font-bold">🎬 動画生成用設定</label>
+
+                          {/* 基本設定 */}
+                          <div className="grid grid-cols-2 gap-2 mb-3">
+                            <div>
+                              <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">尺（秒数）</label>
+                              <div className="px-2 py-1 rounded text-[9px] font-bold bg-purple-500 text-white border border-purple-600 text-center">
+                                5秒（固定）
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">カメラの動き</label>
+                              <input
+                                type="text"
+                                value={cut.cameraMovement || ''}
+                                onChange={(e) => updateCutField(cut.id, 'cameraMovement', e.target.value)}
+                                placeholder="パン、ズームイン、固定..."
+                                className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
+                              />
+                            </div>
+                          </div>
+
+                          {/* メインキャラとIPの関係・位置 */}
+                          <div className="mb-3 p-2 bg-cyan-50/50 dark:bg-cyan-500/5 rounded-lg border border-cyan-200 dark:border-cyan-500/20">
+                            <label className="text-[8px] text-cyan-600 dark:text-cyan-400 uppercase tracking-wider mb-2 block font-bold">👥 キャラクターの関係・位置</label>
+                            <div className="grid grid-cols-3 gap-2">
+                              <div>
+                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">メインキャラ位置</label>
+                                <input
+                                  type="text"
+                                  value={cut.mainCharPosition || ''}
+                                  onChange={(e) => updateCutField(cut.id, 'mainCharPosition', e.target.value)}
+                                  placeholder="中央、左側..."
+                                  className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">IP位置</label>
+                                <input
+                                  type="text"
+                                  value={cut.ipPosition || ''}
+                                  onChange={(e) => updateCutField(cut.id, 'ipPosition', e.target.value)}
+                                  placeholder="右側、背後..."
+                                  className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">関係性</label>
+                                <input
+                                  type="text"
+                                  value={cut.mainIpRelation || ''}
+                                  onChange={(e) => updateCutField(cut.id, 'mainIpRelation', e.target.value)}
+                                  placeholder="隣り合い、対面..."
+                                  className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-cyan-500/50"
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* メインキャラの動き・表情 */}
+                          <div className="mb-3 p-2 bg-blue-50/50 dark:bg-blue-500/5 rounded-lg border border-blue-200 dark:border-blue-500/20">
+                            <label className="text-[8px] text-blue-600 dark:text-blue-400 uppercase tracking-wider mb-2 block font-bold">👤 メインキャラの動き・表情</label>
+                            <div className="grid grid-cols-3 gap-2">
+                              <div>
+                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">表情</label>
+                                <input
+                                  type="text"
+                                  value={cut.mainCharExpression || ''}
+                                  onChange={(e) => updateCutField(cut.id, 'mainCharExpression', e.target.value)}
+                                  placeholder="笑顔、真剣..."
+                                  className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-blue-500/50"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">開始フレーム</label>
+                                <input
+                                  type="text"
+                                  value={cut.startFrame || ''}
+                                  onChange={(e) => updateCutField(cut.id, 'startFrame', e.target.value)}
+                                  placeholder="立っている..."
+                                  className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-blue-500/50"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">終了フレーム</label>
+                                <input
+                                  type="text"
+                                  value={cut.endFrame || ''}
+                                  onChange={(e) => updateCutField(cut.id, 'endFrame', e.target.value)}
+                                  placeholder="歩き去る..."
+                                  className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-blue-500/50"
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* IPの動き・表情 */}
+                          {cut.showSub && (
+                            <div className="mb-3 p-2 bg-purple-100/50 dark:bg-purple-500/5 rounded-lg border border-purple-300 dark:border-purple-500/20">
+                              <label className="text-[8px] text-purple-600 dark:text-purple-400 uppercase tracking-wider mb-2 block font-bold">🎭 IPの動き・表情</label>
+                              <div className="grid grid-cols-3 gap-2">
+                                <div>
+                                  <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">表情</label>
+                                  <input
+                                    type="text"
+                                    value={cut.ipExpression || ''}
+                                    onChange={(e) => updateCutField(cut.id, 'ipExpression', e.target.value)}
+                                    placeholder="笑顔、真剣..."
+                                    className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">開始フレーム</label>
+                                  <input
+                                    type="text"
+                                    value={cut.ipStartFrame || ''}
+                                    onChange={(e) => updateCutField(cut.id, 'ipStartFrame', e.target.value)}
+                                    placeholder="静止..."
+                                    className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">終了フレーム</label>
+                                  <input
+                                    type="text"
+                                    value={cut.ipEndFrame || ''}
+                                    onChange={(e) => updateCutField(cut.id, 'ipEndFrame', e.target.value)}
+                                    placeholder="動き出す..."
+                                    className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* トランジション */}
+                          <div className="grid grid-cols-2 gap-2 mb-3">
+                            <div>
+                              <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">トランジション</label>
+                              <div className="flex gap-1">
+                                {['カット', 'フェード', 'ディゾルブ'].map(t => (
+                                  <button
+                                    key={t}
+                                    onClick={() => updateCutField(cut.id, 'transition', t)}
+                                    className={`flex-1 px-1 py-1 rounded text-[8px] font-bold border transition-all ${
+                                      cut.transition === t
+                                        ? 'bg-purple-500 text-white border-purple-600'
+                                        : 'bg-white dark:bg-white/5 border-[#E0E0E0] dark:border-white/10 text-[#78909C] hover:text-[#333] dark:hover:text-white'
+                                    }`}
+                                  >
+                                    {t}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* 動画プロンプト */}
+                          <div className="mb-3">
+                            <label className="text-[8px] text-[#9E9E9E] dark:text-gray-600 block mb-0.5">動画プロンプト</label>
+                            <textarea
+                              value={cut.videoPrompt || ''}
+                              onChange={(e) => updateCutField(cut.id, 'videoPrompt', e.target.value)}
+                              placeholder="動画生成用の詳細な動き指示..."
+                              className="w-full bg-white dark:bg-white/5 border border-[#E0E0E0] dark:border-white/10 rounded px-2 py-1.5 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-purple-500/50 resize-y min-h-[40px]"
+                            />
+                          </div>
+
+                          {/* 動画生成ボタン */}
+                          <div className="pt-3 border-t border-purple-200 dark:border-purple-500/20">
+                            <button
+                              onClick={() => generateVideoForCut(cut.id)}
+                              disabled={cut.isGeneratingVideo || !cut.generatedImageUrl}
+                              className={`w-full py-2.5 rounded-lg font-bold text-xs flex justify-center items-center gap-2 transition-all duration-300 ${
+                                cut.isGeneratingVideo
+                                  ? 'bg-purple-400 text-white cursor-wait'
+                                  : !cut.generatedImageUrl
+                                  ? 'bg-gray-200 dark:bg-white/5 text-[#9E9E9E] dark:text-gray-500 cursor-not-allowed'
+                                  : 'bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-md shadow-purple-500/20 hover:shadow-purple-500/40 hover:scale-[1.02]'
+                              }`}
+                            >
+                              {cut.isGeneratingVideo ? (
+                                <>
+                                  <Loader2 size={14} className="animate-spin" />
+                                  動画生成中...（数分かかります）
+                                </>
+                              ) : (
+                                <>
+                                  <Video size={14} />
+                                  🎬 動画を生成する
+                                </>
+                              )}
+                            </button>
+                            {!cut.generatedImageUrl && (
+                              <p className="text-[9px] text-orange-500 dark:text-orange-400 mt-1.5 text-center">
+                                ⚠️ 先に「画像用」モードで画像を生成してください
+                              </p>
+                            )}
+                            {cut.generatedVideoUrl && (
+                              <p className="text-[9px] text-green-500 dark:text-green-400 mt-1.5 text-center">
+                                ✅ 動画が生成されています（左のサムネイルにマウスを乗せて再生）
+                              </p>
+                            )}
+                          </div>
                         </div>
                       </div>
                     )}
@@ -4460,145 +4927,14 @@ ${inputContext}
                   </div>
                 </div>
 
-                {/* Generation Settings (Video/Still Toggle) */}
-                <div className="glass rounded-2xl p-4 card-hover">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-1 h-5 rounded-full bg-gradient-to-b ${generationSettingsTab === 'video' ? 'from-blue-400 to-indigo-500' : 'from-orange-400 to-red-500'}`}></div>
-                      <div className="flex bg-gray-100 dark:bg-white/5 rounded-lg p-0.5">
-                        <button
-                          onClick={() => setGenerationSettingsTab('still')}
-                          className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-all ${
-                            generationSettingsTab === 'still'
-                              ? 'bg-white dark:bg-white/10 text-orange-600 dark:text-orange-400 shadow-sm'
-                              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-                          }`}
-                        >
-                          静止画設定
-                        </button>
-                        <button
-                          onClick={() => setGenerationSettingsTab('video')}
-                          className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-all ${
-                            generationSettingsTab === 'video'
-                              ? 'bg-white dark:bg-white/10 text-indigo-600 dark:text-indigo-400 shadow-sm'
-                              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-                          }`}
-                        >
-                          動画設定
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 静止画設定 */}
-                  {generationSettingsTab === 'still' && (
-                    <div className="space-y-3">
-                      <div>
-                        <label className="text-[9px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">
-                          <span className="text-gray-400">AI指示</span> メタプロンプト
-                        </label>
-                        <textarea
-                          value={stillImageMetaPrompt}
-                          onChange={(e) => setStillImageMetaPrompt(e.target.value)}
-                          placeholder="静止画生成AIへの指示ルールを設定..."
-                          className="w-full h-24 bg-yellow-50 dark:bg-yellow-500/5 border border-yellow-200 dark:border-yellow-500/20 rounded-lg p-2 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-yellow-500/50 transition-colors custom-scrollbar resize-y"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[9px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">
-                          <span className="text-orange-500">出力</span> 生成プロンプト
-                        </label>
-                        <textarea
-                          value={stillImageStyle}
-                          onChange={(e) => setStillImageStyle(e.target.value)}
-                          placeholder="メタプロンプトを元に生成されるプロンプト（手動編集も可）"
-                          className="w-full h-16 bg-orange-50 dark:bg-orange-500/5 border border-orange-200 dark:border-orange-500/20 rounded-lg p-2 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-orange-500/50 transition-colors custom-scrollbar resize-y"
-                        />
-                      </div>
-                      <div className="flex justify-end">
-                        <button
-                          onClick={saveStillPrompts}
-                          className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white text-[9px] font-bold rounded-lg transition-colors"
-                        >
-                          保存
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* 動画設定 */}
-                  {generationSettingsTab === 'video' && (
-                    <div className="space-y-3">
-                      <div>
-                        <label className="text-[9px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">
-                          <span className="text-gray-400">AI指示</span> メタプロンプト
-                        </label>
-                        <textarea
-                          value={videoMetaPrompt}
-                          onChange={(e) => setVideoMetaPrompt(e.target.value)}
-                          placeholder="動画生成AIへの指示ルールを設定..."
-                          className="w-full h-12 bg-blue-50 dark:bg-blue-500/5 border border-blue-200 dark:border-blue-500/20 rounded-lg p-2 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-blue-500/50 transition-colors custom-scrollbar resize-y"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[9px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">
-                          <span className="text-indigo-500">出力</span> 生成プロンプト
-                        </label>
-                        <textarea
-                          value={videoPromptStyle}
-                          onChange={(e) => setVideoPromptStyle(e.target.value)}
-                          placeholder="メタプロンプトを元に生成されるプロンプト（手動編集も可）"
-                          className="w-full h-16 bg-indigo-50 dark:bg-indigo-500/5 border border-indigo-200 dark:border-indigo-500/20 rounded-lg p-2 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-indigo-500/50 transition-colors custom-scrollbar resize-y"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[9px] font-semibold text-[#78909C] dark:text-gray-400 uppercase tracking-wider mb-1.5 block">
-                          使用モデル
-                        </label>
-                        <select
-                          value={videoGenModel}
-                          onChange={(e) => setVideoGenModel(e.target.value)}
-                          className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-lg p-2 text-[10px] text-[#333] dark:text-gray-300 focus:outline-none focus:border-indigo-500/50 transition-colors"
-                        >
-                          <option value="kling">Kling AI 2.6</option>
-                          <option value="luma">Luma Dream Machine</option>
-                          <option value="runway">Runway Gen-3</option>
-                        </select>
-                      </div>
-                      <div className="flex justify-end">
-                        <button
-                          onClick={saveVideoPrompts}
-                          className="px-3 py-1.5 bg-indigo-500 hover:bg-indigo-600 text-white text-[9px] font-bold rounded-lg transition-colors"
-                        >
-                          保存
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Generate Button */}
-                <div className="glass rounded-2xl p-4 animate-in slide-in-from-bottom-4 duration-500">
-                  <button
-                    onClick={generateAllCutImages}
-                    disabled={isGenerating}
-                    className={`w-full py-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2.5 transition-all duration-300 ${
-                      isGenerating
-                        ? 'bg-[#F5F5F5] text-[#444] cursor-not-allowed border border-[#E0E0E0]'
-                        : 'bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-xl shadow-purple-500/25 hover:shadow-purple-500/40 hover:scale-[1.02]'
-                    }`}
-                  >
-                    {isGenerating ? <Loader2 size={16} className="animate-spin" /> : <ImageIcon size={16} />}
-                    {isGenerating ? `画像を生成中... (${cuts.filter(c => c.isGenerating).length > 0 ? cuts.findIndex(c => c.isGenerating) + 1 : 0}/${enabledCuts.length})` : '画像を生成する'}
-                  </button>
-
-                  {/* Error */}
-                  {error && (
-                    <div className="mt-4 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs">
+                {/* Error Display */}
+                {error && (
+                  <div className="glass rounded-2xl p-4">
+                    <div className="px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs">
                       {error}
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
 
             </div>

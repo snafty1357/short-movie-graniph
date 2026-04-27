@@ -128,7 +128,7 @@ function aiProxyPlugin(env: Record<string, string>): Plugin {
           const claudeMessages = [];
           for (const msg of messages) {
             if (msg.role === 'system') {
-              systemText += msg.content + "\\n";
+              systemText += msg.content + "\n";
             } else {
               claudeMessages.push({ role: msg.role === 'user' ? 'user' : 'assistant', content: msg.content });
             }
@@ -202,9 +202,6 @@ export default defineConfig(({ mode }) => {
       aiProxyPlugin(env),
     ],
     define: {
-      'process.env.API_KEY': JSON.stringify(env.API_KEY),
-      'process.env.OPENAI_API_KEY': JSON.stringify(env.OPENAI_API_KEY),
-      'process.env.VITE_FAL_KEY': JSON.stringify(env.VITE_FAL_KEY),
       'process.env': {},
     },
     // Explicitly expose VITE_ environment variables

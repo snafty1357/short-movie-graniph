@@ -2,7 +2,7 @@
  * Project History Service - プロジェクト（カット構成）の履歴管理
  */
 
-import type { CutItem } from '../components/ShortVideoModal';
+import type { CutItem } from '../types/cuts';
 
 export interface ProjectBudget {
   aiCostPerCall: number;      // AI生成1回あたりのコスト (USD)
@@ -36,6 +36,7 @@ export interface ProjectHistoryEntry {
   aiModel: string;
   budget?: ProjectBudget;           // プロジェクトごとの予算設定
   generationTimes?: GenerationTimes; // 生成時間の記録
+  globalBackgroundImageUrl?: string; // 全体背景画像URL
 }
 
 const STORAGE_KEY = 'snafty_project_history';

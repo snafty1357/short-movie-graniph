@@ -55,7 +55,6 @@ export function useGenerationSettings() {
   // APIステータス
   const [apiStatuses, setApiStatuses] = useState<Record<string, ApiStatus>>({
     openai: { status: 'checking' },
-    claude: { status: 'checking' },
     fal: { status: 'checking' },
   });
 
@@ -89,7 +88,7 @@ export function useGenerationSettings() {
 
   // APIヘルスチェック
   const checkApiHealth = useCallback(async () => {
-    const apis = ['openai', 'claude', 'fal'];
+    const apis = ['openai', 'fal'];
 
     for (const api of apis) {
       setApiStatuses(prev => ({ ...prev, [api]: { status: 'checking' } }));

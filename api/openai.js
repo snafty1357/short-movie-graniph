@@ -3,8 +3,11 @@ export const config = {
 };
 
 export default async function handler(req, res) {
-  // CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  // CORS headers - 環境変数で許可オリジンを制限
+  const allowedOrigin = process.env.CORS_ALLOWED_ORIGIN 
+    ? process.env.CORS_ALLOWED_ORIGIN 
+    : (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '*');
+  res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
@@ -16,6 +19,18 @@ export default async function handler(req, res) {
   const apiKey = process.env.OPENAI_API_KEY || process.env.VITE_OPENAI_API_KEY;
   if (!apiKey) {
     return res.status(500).json({ error: { message: 'OPENAI_API_KEY is not configured' } });
+  }
+
+  // リクエストボディの基本検証
+  if (!req.body || !req.body.messages || !Array.isArray(req.body.messages)) {
+    return res.status(400).json({ error: { message: 'Invalid request: messages array is required' } });
+  }
+
+  // 許可するモデルのホワイトリスト
+  const allowedModels = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo'];
+  const requestedModel = req.body.model || 'gpt-4o';
+  if (!allowedModels.includes(requestedModel)) {
+    return res.status(400).json({ error: { message: `Invalid model: ${requestedModel}` } });
   }
 
   try {

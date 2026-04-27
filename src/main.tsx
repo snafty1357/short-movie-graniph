@@ -23,7 +23,7 @@ class ErrorBoundary extends React.Component<
     if (this.state.hasError) {
       return (
         <div style={{ background: '#0a0a0f', color: '#ff6b6b', padding: 40, minHeight: '100vh', fontFamily: 'monospace' }}>
-          <h1 style={{ color: '#fff', marginBottom: 16 }}>⚠️ VESTRA - Error</h1>
+          <h1 style={{ color: '#fff', marginBottom: 16 }}>⚠️ Snafty Studio - Error</h1>
           <p style={{ marginBottom: 8 }}>Application crashed:</p>
           <pre style={{ whiteSpace: 'pre-wrap', color: '#ffa0a0' }}>{this.state.error?.message}</pre>
           <pre style={{ whiteSpace: 'pre-wrap', color: '#888', fontSize: 12, marginTop: 8 }}>{this.state.error?.stack}</pre>
@@ -66,7 +66,7 @@ try {
   )
 } catch (e: any) {
   document.body.innerHTML = `<div style="background:#0a0a0f;color:#ff6b6b;padding:40px;min-height:100vh;font-family:monospace">
-    <h1 style="color:#fff">⚠️ VESTRA - Startup Error</h1>
+    <h1 style="color:#fff">⚠️ Snafty Studio - Startup Error</h1>
     <pre>${e.message}\n${e.stack}</pre>
   </div>`;
 }
